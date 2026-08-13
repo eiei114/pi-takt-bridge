@@ -70,10 +70,22 @@ test("project stack keeps live screens and external project status together", as
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
   ], 30);
 
+  assert.ok(lines[0]?.includes("input:") && lines[0]?.includes("[pi]"));
   assert.ok(lines.findIndex((line) => line.includes("[repo-a]")) < lines.findIndex((line) => line.includes("[repo-b]")));
   assert.ok(lines.some((line) => line.includes("repo-a live output")));
   assert.ok(lines.some((line) => line.includes("external TAKT session")));
+
+  const autoLines = renderTaktProjectStack([
+    { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
+  ], 30, "pi-auto");
+  assert.ok(autoLines[0]?.includes("[pi-auto]"));
   liveTerminal.dispose();
+});
+
+test("project stack shows input mode even with no active sessions", () => {
+  const lines = renderTaktProjectStack([], 40, "takt");
+  assert.equal(lines[0], "input: pi | [takt] | pi-auto");
+  assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
 test("project stack truncates long paths to the Pi widget width", () => {

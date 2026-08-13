@@ -1,9 +1,19 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { matchesKey, Text } from "@earendil-works/pi-tui";
+import { matchesKey, Key, Text } from "@earendil-works/pi-tui";
 import { TaktAcpClient } from "../lib/takt-acp-client.ts";
 import {
+  cycleTaktInputMode,
+  describeTaktInputMode,
+  formatTaktInputModeLine,
+  isDestructiveTaktAutoInput,
+  parseTaktInputMode,
+  type TaktInputMode,
+} from "../lib/takt-input-mode.ts";
+import {
   createTaktProjectStackWidget,
+  renderTaktTerminal,
+  visibleWidgetLines,
   type TaktProjectStackSource,
   type TaktProjectWidgetEntry,
 } from "../lib/takt-live-panel.ts";
@@ -19,13 +29,21 @@ import {
   saveTaktProfiles,
   type TaktProjectProfile,
 } from "../lib/takt-profile-registry.ts";
-import { formatTaktPastedInput, TaktRunController } from "../lib/takt-run-controller.ts";
+import {
+  formatTaktPastedInput,
+  TaktRunController,
+  terminalEndsWithText,
+} from "../lib/takt-run-controller.ts";
 import { readTaktSummary } from "../lib/takt-state.ts";
 import type { TaktSummary } from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
 
 const WIDGET_KEY = "pi-takt-bridge-projects";
+const STATUS_KEY = "pi-takt-bridge-input-mode";
 const REFRESH_INTERVAL_MS = 2_000;
+const TAKT_INPUT_PROMPT_TIMEOUT_MS = 15_000;
+const TAKT_POST_PASTE_SETTLE_MS = 200;
+const TAKT_AUTO_SCREEN_ROWS = 24;
 
 const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
   profile: Type.Optional(Type.String({ description: "Named TAKT profile; defaults to pi-docs" })),
@@ -33,6 +51,19 @@ const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
   clear: Type.Optional(Type.Boolean({ description: "Run takt clear first; defaults to true" })),
   preset: Type.Optional(Type.String({ description: "Override the profile's exec preset" })),
   sendGo: Type.Optional(Type.Boolean({ description: "Submit /go after the body; defaults to true" })),
+});
+
+const TAKT_SEND_INPUT_PARAMETERS = Type.Object({
+  text: Type.String({ description: "Exact text to paste into the active bridge-owned TAKT PTY" }),
+  submit: Type.Optional(Type.Boolean({
+    description: "Submit with bracketed paste + Enter; defaults to true",
+  })),
+});
+
+const TAKT_READ_SCREEN_PARAMETERS = Type.Object({
+  rows: Type.Optional(Type.Number({
+    description: "Max trailing screen rows to return; defaults to 24",
+  })),
 });
 
 async function showStatus(ctx: ExtensionContext, cwd = ctx.cwd): Promise<void> {
@@ -83,6 +114,8 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
   private refreshInFlight = false;
   private liveWidgetVisible = false;
+  private inputMode: TaktInputMode = "pi";
+  private terminalInputUnsubscribe: (() => void) | undefined;
 
   constructor(cwd: string) {
     this.ensureProject(cwd);
@@ -96,6 +129,10 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       runner: project.runner,
       summary: project.summary,
     }));
+  }
+
+  getInputMode(): TaktInputMode {
+    return this.inputMode;
   }
 
   subscribe(listener: () => void): () => void {
@@ -294,6 +331,117 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     context.ui.notify(`Input sent to TAKT ${project.label}.`, "info");
   }
 
+  async cycleOrSetInputMode(args = ""): Promise<TaktInputMode> {
+    const parsed = parseTaktInputMode(args);
+    if (!parsed) {
+      this.context?.ui.notify(
+        "Unknown TAKT input mode. Use pi, takt, pi-auto, or cycle.",
+        "warning",
+      );
+      return this.inputMode;
+    }
+    if (parsed === "cycle") {
+      return this.cycleInputMode();
+    }
+    return this.setInputMode(parsed);
+  }
+
+  async cycleInputMode(): Promise<TaktInputMode> {
+    let next = cycleTaktInputMode(this.inputMode);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (next === "pi" || this.activeRunningProject()) {
+        return this.setInputMode(next);
+      }
+      next = cycleTaktInputMode(next);
+    }
+    this.context?.ui.notify("No running bridge-owned TAKT session; staying in pi mode.", "warning");
+    return this.setInputMode("pi");
+  }
+
+  async setInputMode(mode: TaktInputMode, options: { quiet?: boolean } = {}): Promise<TaktInputMode> {
+    const context = this.context;
+    if ((mode === "takt" || mode === "pi-auto") && !this.activeRunningProject()) {
+      if (!options.quiet) {
+        context?.ui.notify(`Cannot enter ${mode} mode without a running bridge-owned TAKT session.`, "warning");
+      }
+      mode = "pi";
+    }
+
+    this.clearTerminalInputCapture();
+    this.inputMode = mode;
+
+    if (mode === "takt" && context?.hasUI) {
+      this.terminalInputUnsubscribe = context.ui.onTerminalInput((data) => this.handleTaktFocusInput(data));
+    }
+
+    this.syncInputModeStatus();
+    this.notifyProjects();
+    await this.showLive(false);
+    if (!options.quiet && context?.hasUI) {
+      context.ui.notify(`TAKT input mode: ${mode} — ${describeTaktInputMode(mode)}`, "info");
+    }
+    return this.inputMode;
+  }
+
+  readActiveScreen(rows = TAKT_AUTO_SCREEN_ROWS): {
+    mode: TaktInputMode;
+    project?: string;
+    cwd?: string;
+    running: boolean;
+    lines: string[];
+  } {
+    const project = this.activeRunningProject() ?? this.activeSessionProject();
+    if (!project?.runner.terminal) {
+      return { mode: this.inputMode, running: false, lines: [] };
+    }
+    const maxRows = Math.max(1, Math.min(80, Math.floor(rows || TAKT_AUTO_SCREEN_ROWS)));
+    return {
+      mode: this.inputMode,
+      project: project.label,
+      cwd: project.cwd,
+      running: project.runner.isRunning,
+      lines: visibleWidgetLines(renderTaktTerminal(project.runner.terminal), maxRows),
+    };
+  }
+
+  async sendAutoInput(
+    text: string,
+    options: { submit?: boolean } = {},
+  ): Promise<{ project: string; cwd: string; submitted: boolean }> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      throw new Error("TAKT bridge requires an interactive Pi UI");
+    }
+    if (this.inputMode !== "pi-auto") {
+      throw new Error("takt_send_input requires pi-auto mode. Use /takt:mode pi-auto or Ctrl+Alt+T.");
+    }
+    if (!text.trim()) {
+      throw new Error("TAKT auto input must not be empty");
+    }
+
+    const project = this.activeRunningProject();
+    if (!project) {
+      await this.setInputMode("pi", { quiet: true });
+      throw new Error("No running bridge-owned TAKT session for pi-auto input");
+    }
+
+    if (isDestructiveTaktAutoInput(text)) {
+      const confirmed = await context.ui.confirm(
+        "Confirm TAKT auto input",
+        `Send potentially destructive input to ${project.label}?\n\n${text}`,
+      );
+      if (!confirmed) {
+        throw new Error("Destructive TAKT auto input cancelled");
+      }
+    }
+
+    const shouldSubmit = options.submit !== false;
+    project.runner.write(shouldSubmit ? formatTaktPastedInput(text) : text);
+    context.ui.notify(`Pi-auto sent input to TAKT ${project.label}.`, "info");
+    this.notifyProjects();
+    return { project: project.label, cwd: project.cwd, submitted: shouldSubmit };
+  }
+
   async executePrompt(
     profileName = "pi-docs",
     prompt: string,
@@ -341,25 +489,38 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     onUpdate?.(`Starting takt exec ${preset} in ${project.label}…`);
     await project.runner.start(["exec", preset]);
     await this.showLive(false);
-    await delay(250);
-    if (!project.runner.isRunning) {
-      const result = await project.runner.waitForExit();
-      throw new Error(`takt exec exited before input (exit ${result?.code ?? "unknown"})`);
-    }
-    throwIfAborted(signal);
 
-    project.runner.write(formatTaktPastedInput(prompt));
-    const shouldSendGo = options.sendGo !== false && !prompt.trim().endsWith("/go");
-    if (shouldSendGo) {
-      await delay(120);
-      project.runner.write(formatTaktPastedInput("/go"));
+    try {
+      await waitForTaktInputPrompt(project.runner, signal, TAKT_INPUT_PROMPT_TIMEOUT_MS);
+      throwIfAborted(signal);
+
+      project.runner.write(formatTaktPastedInput(prompt));
+      const shouldSendGo = options.sendGo !== false && !prompt.trim().endsWith("/go");
+      if (shouldSendGo) {
+        // Do not wait for an assistant reply before /go. A long
+        // prompt-transition wait deadlocks when TAKT stays on Assistant>
+        // or hangs mid-response, leaving an orphan process with no run.
+        await delay(TAKT_POST_PASTE_SETTLE_MS);
+        throwIfAborted(signal);
+        if (!project.runner.isRunning) {
+          const result = await project.runner.waitForExit();
+          throw new Error(`takt exec exited before /go (exit ${result?.code ?? "unknown"})`);
+        }
+        project.runner.write(formatTaktPastedInput("/go"));
+      }
+      context.ui.notify(
+        `TAKT prompt submitted to ${project.label}${shouldSendGo ? " with /go" : ""}. Raw output remains in the Pi widget.`,
+        "info",
+      );
+      this.notifyProjects();
+      return { profile: profile.name, cwd: project.cwd, preset, sentGo: shouldSendGo };
+    } catch (error) {
+      if (project.runner.isRunning) {
+        onUpdate?.(`Stopping TAKT in ${project.label} after prompt submission failure…`);
+        await project.runner.stop();
+      }
+      throw error;
     }
-    context.ui.notify(
-      `TAKT prompt submitted to ${project.label}${shouldSendGo ? " with /go" : ""}. Raw output remains in the Pi widget.`,
-      "info",
-    );
-    this.notifyProjects();
-    return { profile: profile.name, cwd: project.cwd, preset, sentGo: shouldSendGo };
   }
 
   async addProject(args = ""): Promise<void> {
@@ -582,6 +743,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       clearInterval(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+    this.clearTerminalInputCapture();
+    this.inputMode = "pi";
+    this.context?.ui.setStatus(STATUS_KEY, undefined);
     this.clearLiveWidget();
     await Promise.all([...this.projects.values()].map(async (project) => {
       await project.acp.close();
@@ -625,7 +789,11 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         }
         const outcome = code === 0 ? "finished" : "exited with errors";
         context.ui.notify(`TAKT ${project.label} ${outcome} (exit ${code}).`, code === 0 ? "info" : "error");
-        this.notifyProjects();
+        if ((this.inputMode === "takt" || this.inputMode === "pi-auto") && !this.activeRunningProject()) {
+          void this.setInputMode("pi", { quiet: true });
+        } else {
+          this.notifyProjects();
+        }
       },
     });
     const project: ManagedProject = { id, cwd: normalized, label, acp, runner };
@@ -710,6 +878,56 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     );
   }
 
+  private activeRunningProject(): ManagedProject | undefined {
+    const running = [...this.projects.values()].filter((project) => project.runner.isRunning);
+    if (running.length === 0) {
+      return undefined;
+    }
+    const current = this.context ? this.projects.get(projectPathKey(this.context.cwd)) : undefined;
+    if (current?.runner.isRunning) {
+      return current;
+    }
+    return running.sort((left, right) => left.label.localeCompare(right.label))[0];
+  }
+
+  private activeSessionProject(): ManagedProject | undefined {
+    return this.activeRunningProject()
+      ?? [...this.projects.values()].find((project) => project.runner.hasSession);
+  }
+
+  private handleTaktFocusInput(data: string): { consume: boolean } {
+    if (matchesKey(data, "escape")) {
+      void this.setInputMode("pi");
+      return { consume: true };
+    }
+
+    const project = this.activeRunningProject();
+    if (!project) {
+      void this.setInputMode("pi", { quiet: true });
+      this.context?.ui.notify("TAKT focus ended because no bridge-owned session is running.", "warning");
+      return { consume: true };
+    }
+
+    project.runner.write(data);
+    return { consume: true };
+  }
+
+  private clearTerminalInputCapture(): void {
+    this.terminalInputUnsubscribe?.();
+    this.terminalInputUnsubscribe = undefined;
+  }
+
+  private syncInputModeStatus(): void {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    context.ui.setStatus(
+      STATUS_KEY,
+      this.inputMode === "pi" ? undefined : `takt input: ${formatTaktInputModeLine(this.inputMode)}`,
+    );
+  }
+
   private persistProjects(): void {
     try {
       saveProjectPaths([...this.projects.values()].map((project) => project.cwd));
@@ -762,6 +980,26 @@ async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function waitForTaktInputPrompt(
+  runner: TaktRunController,
+  signal: AbortSignal | undefined,
+  timeoutMs = TAKT_INPUT_PROMPT_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    throwIfAborted(signal);
+    if (!runner.isRunning) {
+      const result = await runner.waitForExit();
+      throw new Error(`takt exec exited before input (exit ${result?.code ?? "unknown"})`);
+    }
+    if (terminalEndsWithText(runner.terminal, "Assistant>")) {
+      return;
+    }
+    await delay(50);
+  }
+  throw new Error(`takt exec did not reach the Assistant> input prompt within ${timeoutMs / 1_000} seconds`);
+}
+
 export default function register(pi: ExtensionAPI): void {
   let runtime: TaktBridgeRuntime | undefined;
 
@@ -797,6 +1035,66 @@ export default function register(pi: ExtensionAPI): void {
         content: [{ type: "text", text: `TAKT started: ${result.profile} (${result.preset})\n${result.cwd}` }],
         details: result,
         terminate: true,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "takt_read_screen",
+    label: "TAKT Read Screen",
+    description: "Read the current bridge-owned TAKT live screen for pi-auto follow-up decisions.",
+    promptSnippet: "Inspect the live TAKT widget screen while pi-auto mode is active",
+    promptGuidelines: [
+      "Use takt_read_screen before sending follow-up input in pi-auto mode.",
+      "Only the active bridge-owned TAKT PTY is visible; external status cards are not raw screens.",
+    ],
+    parameters: TAKT_READ_SCREEN_PARAMETERS,
+    async execute(_toolCallId, params) {
+      const activeRuntime = runtime;
+      if (!activeRuntime) {
+        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
+      }
+      const screen = activeRuntime.readActiveScreen(params.rows);
+      const header = [
+        `mode: ${screen.mode}`,
+        screen.project ? `project: ${screen.project}` : "project: none",
+        screen.cwd ? `cwd: ${screen.cwd}` : undefined,
+        `running: ${screen.running}`,
+      ].filter(Boolean);
+      return {
+        content: [{
+          type: "text",
+          text: `${header.join("\n")}\n\n${screen.lines.join("\n") || "(empty screen)"}`,
+        }],
+        details: screen,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "takt_send_input",
+    label: "TAKT Send Input",
+    description: "Send follow-up text to the active bridge-owned TAKT PTY while pi-auto mode is enabled.",
+    promptSnippet: "Send allowed TAKT follow-up input during pi-auto mode",
+    promptGuidelines: [
+      "Only use takt_send_input after /takt:mode pi-auto or the Ctrl+Alt+T cycle lands on pi-auto.",
+      "Read the live screen with takt_read_screen first when deciding what to send.",
+      "Keep auto input short. Destructive commands require an interactive confirmation.",
+      "Do not use this tool to replace takt_exec_prompt for the initial clear → exec → /go flow.",
+    ],
+    parameters: TAKT_SEND_INPUT_PARAMETERS,
+    async execute(_toolCallId, params) {
+      const activeRuntime = runtime;
+      if (!activeRuntime) {
+        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
+      }
+      const result = await activeRuntime.sendAutoInput(params.text, { submit: params.submit });
+      return {
+        content: [{
+          type: "text",
+          text: `TAKT auto input sent to ${result.project}${result.submitted ? " (submitted)" : ""}\n${result.cwd}`,
+        }],
+        details: result,
       };
     },
   });
@@ -924,10 +1222,24 @@ export default function register(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("takt:mode", {
+    description: "Cycle or set TAKT input mode: pi, takt, or pi-auto",
+    handler: async (args, _context) => {
+      await runtime?.cycleOrSetInputMode(args);
+    },
+  });
+
   pi.registerCommand("takt:stop", {
     description: "Stop a TAKT process started by Pi",
     handler: async (args, _context) => {
       await runtime?.stopRunning(args);
+    },
+  });
+
+  pi.registerShortcut(Key.ctrlAlt("t"), {
+    description: "Cycle TAKT input mode (pi → takt → pi-auto)",
+    handler: async () => {
+      await runtime?.cycleInputMode();
     },
   });
 

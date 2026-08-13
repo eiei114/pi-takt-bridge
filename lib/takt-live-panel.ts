@@ -4,6 +4,10 @@ import {
   type Component,
 } from "@earendil-works/pi-tui";
 import type { Terminal } from "@xterm/headless";
+import {
+  formatTaktInputModeLine,
+  type TaktInputMode,
+} from "./takt-input-mode.ts";
 import type { TaktSummary } from "./takt-types.ts";
 
 const DEFAULT_COLUMNS = 120;
@@ -30,6 +34,7 @@ export interface TaktProjectWidgetEntry {
 
 export interface TaktProjectStackSource {
   getProjects(): readonly TaktProjectWidgetEntry[];
+  getInputMode?(): TaktInputMode;
   subscribe(listener: () => void): () => void;
 }
 
@@ -113,7 +118,11 @@ class TaktProjectStackWidget implements Component {
   }
 
   render(width: number): string[] {
-    return renderTaktProjectStack(this.source.getProjects(), normalizeWidgetWidth(width));
+    return renderTaktProjectStack(
+      this.source.getProjects(),
+      normalizeWidgetWidth(width),
+      this.source.getInputMode?.() ?? "pi",
+    );
   }
 
   invalidate(): void {
@@ -128,12 +137,13 @@ class TaktProjectStackWidget implements Component {
 export function renderTaktProjectStack(
   projects: readonly TaktProjectWidgetEntry[],
   width: number,
+  inputMode: TaktInputMode = "pi",
 ): string[] {
   const columns = normalizeWidgetWidth(width);
   const visibleProjects = [...projects]
     .filter((project) => project.runner?.hasSession || hasObservedActivity(project.summary))
     .sort(compareProjectActivity);
-  const lines: string[] = [];
+  const lines: string[] = [`input: ${formatTaktInputModeLine(inputMode)}`];
   let shownProjects = 0;
 
   for (const project of visibleProjects) {
@@ -156,7 +166,10 @@ export function renderTaktProjectStack(
   }
 
   if (visibleProjects.length === 0) {
-    return fitTaktWidgetLines(["TAKT projects: no active sessions."], columns);
+    return fitTaktWidgetLines([
+      `input: ${formatTaktInputModeLine(inputMode)}`,
+      "TAKT projects: no active sessions.",
+    ], columns);
   }
   if (shownProjects < visibleProjects.length) {
     const more = `… ${visibleProjects.length - shownProjects} more TAKT projects`;

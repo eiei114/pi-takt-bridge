@@ -45,6 +45,7 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:clear [path]` | Clear the selected project's previous TAKT exec session |
 | `/takt:exec [path]` | Start a fresh interactive `takt exec` PTY in a selected folder |
 | `/takt:send [path]` | Paste multiline input into a bridge-owned interactive TAKT session |
+| `/takt:mode [pi\|takt\|pi-auto]` | Cycle or set dual-input mode (`Ctrl+Alt+T`) |
 | `/takt:stop [path]` | Confirm and interrupt a TAKT process started by Pi |
 | `/takt:status` | Open the optional diagnostic state overlay |
 
@@ -54,14 +55,22 @@ preserves the prompt exactly, clears the old session, starts a fresh preset,
 and leaves raw output in the stacked Pi widget. If the tool or profile is
 missing, the skill reports the configuration error instead of guessing a path.
 
+After a session is live, dual input modes let you keep talking to TAKT without
+leaving Pi:
+
+- `pi` (default): editor stays on Pi; use `/takt:send` or tools
+- `takt`: keys go to the active bridge-owned PTY; `Esc` returns to `pi`
+- `pi-auto`: Pi can inspect with `takt_read_screen` and send follow-ups with
+  `takt_send_input` (destructive input still confirms)
+
 The current Pi folder plus registered folders are monitored. Active project
 screens are stacked above the normal Pi editor, with the most active project
 first. Bridge-owned PTYs show raw TAKT output. A TAKT process started in another
 terminal can be detected from its `.takt` state, but its original PTY cannot be
 attached safely; that project is shown as an external status card instead.
 
-Pi remains visible and keeps focus. Use `/takt:send` for explicit pasted input
-to a bridge-owned `takt exec`; keyboard input is never forwarded implicitly.
+Default mode keeps Pi focused. Use `/takt:mode` or `Ctrl+Alt+T` when you want
+direct TAKT focus or Pi-auto follow-ups.
 Registered folders and named profiles are saved outside the vault in the user
 config directory. A profile makes a folder path optional for every command:
 

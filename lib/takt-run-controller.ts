@@ -27,6 +27,46 @@ export function formatTaktPastedInput(value: string): string {
 }
 
 /**
+ * Check the parsed terminal buffer rather than the PTY's process state. TAKT
+ * can be alive while its interactive editor is still starting up, so callers
+ * that paste input need a way to wait for the actual prompt.
+ */
+export function terminalContainsText(terminal: XtermTerminal | undefined, text: string): boolean {
+  if (!terminal || !text) {
+    return false;
+  }
+
+  const buffer = terminal.buffer.active;
+  for (let row = 0; row < buffer.length; row += 1) {
+    const line = buffer.getLine(row)?.translateToString(true);
+    if (line?.includes(text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Check the last non-empty buffer line. Scrollback still contains the previous
+ * prompt, so a contains-anywhere check must not satisfy post-submit readiness.
+ */
+export function terminalEndsWithText(terminal: XtermTerminal | undefined, text: string): boolean {
+  if (!terminal || !text) {
+    return false;
+  }
+
+  const buffer = terminal.buffer.active;
+  for (let row = buffer.length - 1; row >= 0; row -= 1) {
+    const line = buffer.getLine(row)?.translateToString(true).trimEnd();
+    if (!line) {
+      continue;
+    }
+    return line.trim() === text;
+  }
+  return false;
+}
+
+/**
  * Runs TAKT in a real pseudo-terminal and keeps an xterm-compatible screen
  * buffer. A pipe is not enough here: TAKT changes its output and input
  * behavior when stdout/stdin are TTYs.

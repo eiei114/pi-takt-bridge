@@ -13,6 +13,9 @@
 
 ## Phase 1 — next
 
+- [x] Dual input modes cycled by shortcut: `pi` → `takt` → `pi-auto`
+- [x] TAKT focus mode with Esc back to Pi; widget shows the active input mode
+- [x] Pi-auto tools (`takt_read_screen`, `takt_send_input`) with confirm for destructive actions
 - PTY resize, mouse/scrollback, and alternate-screen polish
 - NDJSON detail view linked from the diagnostic overlay
 - Better task/run matching and stale-process diagnostics

@@ -80,6 +80,26 @@ that project. The bridge uses terminal bracketed-paste markers, so newlines stay
 inside one TAKT input; submit the issue body first, then send `/go`. This keeps
 normal Pi input focused on Pi while preserving the raw TAKT PTY screen above it.
 
+## Dual input modes
+
+The stacked widget shows the current input mode:
+
+```text
+input: [pi] | takt | pi-auto
+```
+
+Cycle with `Ctrl+Alt+T` or `/takt:mode`:
+
+| Mode | Behavior |
+|---|---|
+| `pi` | Default. Pi keeps editor focus. Use `/takt:send` or `takt_exec_prompt`. |
+| `takt` | Human keys go to the active bridge-owned TAKT PTY. `Esc` returns to `pi`. |
+| `pi-auto` | Pi may call `takt_read_screen` / `takt_send_input` for short follow-ups. |
+
+`takt` and `pi-auto` require a running bridge-owned session. If that session
+exits, the bridge falls back to `pi`. Destructive auto input such as `/clear`
+still asks for confirmation.
+
 ## Live widget and diagnostics
 
 `/takt` starts a run in the current project if no terminal session exists, or
@@ -91,10 +111,11 @@ progress updates are rendered as a screen rather than dumped as broken escape
 codes. Each panel is capped to the latest visible lines to preserve Pi's editor
 space.
 
-The widget does not capture keyboard focus or forward input. Use
-`/takt:send` for explicit interactive input and `/takt:stop` to stop TAKT. When
-a bridge-owned child exits, its final widget contents stay on screen and Pi
-sends a success/error notification with the exit code.
+In the default `pi` mode the widget does not capture keyboard focus. Use
+`/takt:send` for explicit interactive input, `/takt:mode takt` for direct PTY
+focus, and `/takt:stop` to stop TAKT. When a bridge-owned child exits, its final
+widget contents stay on screen and Pi sends a success/error notification with
+the exit code.
 
 `/takt:status` remains available as an optional diagnostic overlay. It is not
 the execution view and is not polled into the live output widget.

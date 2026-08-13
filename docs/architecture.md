@@ -38,9 +38,12 @@ Pi command / project path
 - External project processes can be detected from `.takt` metadata, but their
   original PTY is not attachable safely. They use a status card; only
   bridge-owned projects show raw output.
-- Pi input is not forwarded implicitly. `/takt:send` is the explicit input seam;
-  `/takt:stop` owns stopping bridge children. Normal Pi shortcuts remain normal
-  Pi shortcuts.
+- Default input mode is `pi`: input is not forwarded implicitly. `/takt:send`
+  remains the explicit seam, and `/takt:stop` owns stopping bridge children.
+- Optional dual-input modes cycle with a shortcut: `pi` → `takt` (human types
+  into the active bridge-owned PTY) → `pi-auto` (Pi may send allowed follow-ups).
+  Destructive auto actions still require confirmation. External status cards are
+  never writable.
 - A run is not assumed to be singular; the summary is derived from all run
   records in the project when the optional diagnostic overlay is requested.
 

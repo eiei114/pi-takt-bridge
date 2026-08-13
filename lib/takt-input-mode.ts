@@ -1,0 +1,61 @@
+export const TAKT_INPUT_MODES = ["pi", "takt", "pi-auto"] as const;
+
+export type TaktInputMode = (typeof TAKT_INPUT_MODES)[number];
+
+const DESTRUCTIVE_AUTO_INPUT =
+  /(?:^|\s)(?:\/(?:clear|stop|abort|cancel|quit|exit)\b|takt\s+clear\b|rm\s+-rf\b|del\s+\/[sq]\b)/i;
+
+/** Move one step around the dual-input cycle. */
+export function cycleTaktInputMode(mode: TaktInputMode): TaktInputMode {
+  const index = TAKT_INPUT_MODES.indexOf(mode);
+  return TAKT_INPUT_MODES[(index + 1) % TAKT_INPUT_MODES.length] ?? "pi";
+}
+
+/** Parse a mode token from `/takt:mode` args. */
+export function parseTaktInputMode(value: string | undefined): TaktInputMode | "cycle" | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return "cycle";
+  }
+  if (normalized === "cycle" || normalized === "next") {
+    return "cycle";
+  }
+  if ((TAKT_INPUT_MODES as readonly string[]).includes(normalized)) {
+    return normalized as TaktInputMode;
+  }
+  return undefined;
+}
+
+/** Compact widget/status label for the three-state cycle. */
+export function formatTaktInputModeLine(mode: TaktInputMode): string {
+  return TAKT_INPUT_MODES
+    .map((candidate) => (candidate === mode ? `[${candidate}]` : candidate))
+    .join(" | ");
+}
+
+/** Human-readable mode description for notifications. */
+export function describeTaktInputMode(mode: TaktInputMode): string {
+  switch (mode) {
+    case "pi":
+      return "Pi editor focus; TAKT input only via /takt:send or tools";
+    case "takt":
+      return "TAKT focus; keys go to the active bridge-owned PTY (Esc returns to pi)";
+    case "pi-auto":
+      return "Pi-auto; Pi may send allowed follow-ups to the active bridge-owned PTY";
+  }
+}
+
+/**
+ * Detect auto-input that should keep a human confirmation gate even in
+ * pi-auto mode. This is intentionally conservative.
+ */
+export function isDestructiveTaktAutoInput(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return false;
+  }
+  if (trimmed.includes("\u0003")) {
+    return true;
+  }
+  return DESTRUCTIVE_AUTO_INPUT.test(trimmed);
+}
