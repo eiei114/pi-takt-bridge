@@ -1,90 +1,240 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
-import { formatGreeting, type GreetingMode } from "../lib/greeting.ts";
-import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey, Text } from "@earendil-works/pi-tui";
+import { readTaktSummary } from "../lib/takt-state.ts";
+import { TaktAcpClient } from "../lib/takt-acp-client.ts";
+import { TaktRunController } from "../lib/takt-run-controller.ts";
+import { renderTaktDetails, renderTaktWidget } from "../lib/takt-widget.ts";
+import type { TaktSummary } from "../lib/takt-types.ts";
 
-const greetParameters = Type.Object({
-  name: Type.String({ description: "Name to greet" }),
-  mode: StringEnum(["short", "friendly"] as const, {
-    description: "Greeting style. Prefer short unless the user asks for more warmth.",
-  }),
-});
+const WIDGET_KEY = "pi-takt-bridge";
+const REFRESH_INTERVAL_MS = 1_000;
 
-type GreetParams = {
-  name: string;
-  mode: GreetingMode;
-};
-
-function normalizeGreetArgs(args: unknown): GreetParams {
-  if (!args || typeof args !== "object") {
-    return args as GreetParams;
+async function showStatus(ctx: ExtensionContext, summary?: TaktSummary): Promise<void> {
+  if (!ctx.hasUI) {
+    return;
   }
 
-  const input = args as {
-    name?: string;
-    mode?: GreetingMode;
-    greetingStyle?: GreetingMode;
-  };
+  const current = summary ?? (await readTaktSummary(ctx.cwd));
+  const lines = renderTaktDetails(current);
 
-  if (input.greetingStyle && input.mode === undefined) {
-    return { name: input.name ?? "Pi", mode: input.greetingStyle };
-  }
+  await ctx.ui.custom<void>(
+    (_tui, theme, _keybindings, done) => {
+      const text = new Text(
+        lines.map((line) => theme.fg("text", line)).join("\n") +
+          "\n\n" +
+          theme.fg("dim", "Press Enter or Esc to close"),
+        0,
+        0,
+      );
 
-  return args as GreetParams;
+      return {
+        render: (width: number) => text.render(width),
+        invalidate: () => text.invalidate(),
+        handleInput: (data: string) => {
+          if (matchesKey(data, "enter") || matchesKey(data, "escape")) {
+            done();
+          }
+        },
+      };
+    },
+    { overlay: true },
+  );
 }
 
-export default function (pi: ExtensionAPI) {
-  pi.registerCommand("template-info", {
-    description: "Show TypeScript template information",
-    handler: async (_args, ctx) => {
-      if (ctx.hasUI) {
-        ctx.ui.notify("TypeScript-first Pi package template loaded.", "info");
+class TaktBridgeRuntime {
+  private readonly acp: TaktAcpClient;
+  private readonly runner: TaktRunController;
+  private readonly cwd: string;
+  private context: ExtensionContext | undefined;
+  private timer: ReturnType<typeof setInterval> | undefined;
+  private refreshing = false;
+  private summary: TaktSummary | undefined;
+
+  constructor(cwd: string) {
+    this.cwd = cwd;
+    this.acp = new TaktAcpClient({ cwd });
+    this.runner = new TaktRunController({ cwd });
+  }
+
+  attach(context: ExtensionContext): void {
+    this.context = context;
+    if (!context.hasUI) {
+      return;
+    }
+
+    void this.refresh();
+    this.timer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
+  }
+
+  get currentSummary(): TaktSummary | undefined {
+    return this.summary;
+  }
+
+  async enqueueTask(task: string): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    context.ui.setStatus(WIDGET_KEY, "TAKT: enqueueing…");
+    try {
+      await this.acp.enqueue(task);
+      context.ui.notify("TAKT task queued (worktree run).", "info");
+      await this.refresh();
+    } catch (error) {
+      context.ui.notify(`TAKT enqueue failed: ${errorMessage(error)}`, "error");
+    } finally {
+      context.ui.setStatus(WIDGET_KEY, undefined);
+    }
+  }
+
+  async startPending(): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    if (this.runner.isRunning) {
+      context.ui.notify("TAKT is already running.", "warning");
+      return;
+    }
+
+    const confirmed = await context.ui.confirm(
+      "Start TAKT",
+      "Run all pending TAKT tasks? Each task keeps TAKT's worktree setting.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      await this.runner.start();
+      context.ui.notify("TAKT run started.", "info");
+      await this.refresh();
+    } catch (error) {
+      context.ui.notify(`TAKT start failed: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async stopRunning(): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    if (!this.runner.isRunning) {
+      context.ui.notify("No TAKT process is running from Pi.", "info");
+      return;
+    }
+
+    const confirmed = await context.ui.confirm(
+      "Stop TAKT",
+      "Send an interrupt to the TAKT process? The current task may be marked aborted.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    await this.runner.stop();
+    context.ui.notify("TAKT stop requested.", "info");
+    await this.refresh();
+  }
+
+  async refresh(): Promise<void> {
+    if (this.refreshing) {
+      return;
+    }
+
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    this.refreshing = true;
+    try {
+      this.summary = await readTaktSummary(this.cwd);
+      context.ui.setWidget(WIDGET_KEY, renderTaktWidget(this.summary));
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.timer !== undefined) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
+
+    const context = this.context;
+    context?.ui.setWidget(WIDGET_KEY, undefined);
+    await this.acp.close();
+    await this.runner.stop();
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export default function register(pi: ExtensionAPI): void {
+  let runtime: TaktBridgeRuntime | undefined;
+
+  pi.on("session_start", async (_event, context) => {
+    await runtime?.shutdown();
+    runtime = new TaktBridgeRuntime(context.cwd);
+    runtime.attach(context);
+  });
+
+  pi.on("session_shutdown", async () => {
+    await runtime?.shutdown();
+    runtime = undefined;
+  });
+
+  pi.registerCommand("takt", {
+    description: "Open the TAKT status overlay",
+    handler: async (_args, context) => {
+      await showStatus(context, runtime?.currentSummary);
+    },
+  });
+
+  pi.registerCommand("takt:status", {
+    description: "Open the TAKT status overlay",
+    handler: async (_args, context) => {
+      await showStatus(context, runtime?.currentSummary);
+    },
+  });
+
+  pi.registerCommand("takt:enqueue", {
+    description: "Queue a TAKT task through ACP without starting it",
+    handler: async (_args, context) => {
+      if (!context.hasUI || !runtime) {
+        return;
+      }
+      const task = await context.ui.input("TAKT task", "Describe the task to queue");
+      if (task?.trim()) {
+        await runtime.enqueueTask(task.trim());
       }
     },
   });
 
-  pi.registerTool({
-    name: "template_greet",
-    label: "Template Greet",
-    description: "Return a typed greeting from the Pi package template",
-    promptSnippet: "template_greet: return a typed greeting from the template package",
-    promptGuidelines: [
-      "Use template_greet only when testing this template package or greeting the user.",
-    ],
-    parameters: greetParameters,
-    prepareArguments: normalizeGreetArgs,
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      if (signal?.aborted) {
-        return { content: [{ type: "text", text: "Cancelled" }], details: {} };
-      }
-
-      const message = formatGreeting(params);
-
-      return {
-        content: [{ type: "text", text: message }],
-        details: { message, mode: params.mode },
-      };
+  pi.registerCommand("takt:start", {
+    description: "Start all pending TAKT tasks",
+    handler: async (_args, _context) => {
+      await runtime?.startPending();
     },
+  });
 
-    renderCall(args, theme, _context) {
-      let text = theme.fg("toolTitle", theme.bold("template_greet "));
-      text += theme.fg("accent", `name=${args.name}`);
-      text += theme.fg("dim", ` mode=${args.mode}`);
-      return new Text(text, 0, 0);
+  pi.registerCommand("takt:stop", {
+    description: "Stop the TAKT process started by Pi",
+    handler: async (_args, _context) => {
+      await runtime?.stopRunning();
     },
+  });
 
-    renderResult(result, { expanded }, theme, _context) {
-      const details = result.details as { message: string; mode: string } | undefined;
-      const content = result.content[0];
-      const message =
-        details?.message ?? (content?.type === "text" ? content.text : "");
-
-      let text = theme.fg("success", "→ ") + theme.fg("text", message);
-      if (expanded && details) {
-        text += `\n${theme.fg("dim", `mode: ${details.mode}`)}`;
-      }
-      return new Text(text, 0, 0);
+  pi.registerShortcut(Key.ctrlShift("t"), {
+    description: "Open TAKT status",
+    handler: async (context) => {
+      await showStatus(context, runtime?.currentSummary);
     },
   });
 }

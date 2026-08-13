@@ -36,6 +36,3 @@ Thumbs.db
 *.log
 .tmp/
 tmp/
-
-# generated CLI template bundle
-packages/create-pi-extension/template/
