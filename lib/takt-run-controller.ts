@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { stopChild } from "./process-control.ts";
 import { resolveCommand, usesWindowsShell } from "./takt-state.ts";
 
 export interface TaktRunControllerOptions {
@@ -63,21 +64,7 @@ export class TaktRunController {
       return;
     }
 
-    try {
-      child.kill("SIGINT");
-    } catch {
-      // The process may have exited between the check and kill.
-    }
-
-    const exited = await waitForExit(child, 1_500);
-    if (!exited && child.exitCode === null) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Best effort. The close listener still reconciles the next state poll.
-      }
-      await waitForExit(child, 1_000);
-    }
+    await stopChild(child, "SIGINT", 1_500);
     if (this.child === child && child.exitCode !== null) {
       this.child = undefined;
     }
@@ -118,24 +105,5 @@ function waitForSpawn(child: ChildProcess): Promise<void> {
     };
     child.once("spawn", onSpawn);
     child.once("error", onError);
-  });
-}
-
-function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null) {
-    return Promise.resolve(true);
-  }
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve(value);
-    };
-    const timer = setTimeout(() => finish(false), timeoutMs);
-    child.once("close", () => finish(true));
   });
 }

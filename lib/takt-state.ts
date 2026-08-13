@@ -223,6 +223,6 @@ function isTaskItem(value: unknown): value is TaktTaskItem {
   return true;
 }
 
-function isRecord(value: unknown): value is Record<string, any> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

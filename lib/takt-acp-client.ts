@@ -12,6 +12,7 @@ import {
   type PromptResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import { stopChild } from "./process-control.ts";
 import { resolveCommand, usesWindowsShell } from "./takt-state.ts";
 
 export interface TaktAcpClientOptions {
@@ -175,34 +176,5 @@ function collectStderr(child: ChildProcess): { value: string } {
 }
 
 async function terminate(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) {
-    return;
-  }
-  try {
-    child.kill("SIGTERM");
-  } catch {
-    return;
-  }
-  await new Promise<void>((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      if (child.exitCode === null) {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // Best effort.
-        }
-      }
-      finish();
-    }, 1_000);
-    child.once("close", finish);
-  });
+  await stopChild(child);
 }
