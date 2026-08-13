@@ -11,25 +11,40 @@ above the normal Pi editor.
 
 ## Default workflow
 
-1. Treat the user's task body as the exact TAKT prompt. Preserve Markdown,
-   code fences, issue numbers, file paths, and constraints. Do not summarize or
-   rewrite it.
+1. Prefer a concise TAKT prompt. Preserve issue numbers, file paths, constraints,
+   and code fences. Long GitHub issue bodies may be shortened to the actionable
+   scope (files to change, must/must-not, verification). The widget already
+   truncates long pasted bodies during `pasting` / `sending_go`.
 2. Use the named profile `pi-docs` unless the user explicitly names another
    profile.
-3. Call `takt_exec_prompt` exactly once with:
+3. Call `takt_read_screen` first when a session may already be running.
+4. Call `takt_exec_prompt` with:
 
    ```json
    {
      "profile": "pi-docs",
-     "prompt": "<the exact user task body>",
+     "prompt": "<concise task body>",
      "clear": true,
-     "sendGo": true
+     "sendGo": true,
+     "replace": true
    }
    ```
 
-4. Let the tool return after the prompt and `/go` are submitted. TAKT's raw
-   live screen remains in the Pi project stack; do not start a second TAKT
-   process or claim that the task is complete.
+5. Let the tool return after the prompt and `/go` are submitted. A successful
+   submit switches input mode to `pi-auto` automatically. TAKT's raw live screen
+   remains in the Pi project stack; do not start a second TAKT process or claim
+   that the task is complete.
+
+## Recovery
+
+- If `takt_exec_prompt` reports an already-running session, call it again with
+  `replace: true` (the default) or call `takt_stop` first.
+- If the widget looks frozen, read `stage:` from `takt_read_screen` before
+  assuming a hang. `pasting` / `sending_go` intentionally show a prompt preview.
+- Use `takt_set_mode` only when you need an explicit mode change outside the
+  automatic post-submit `pi-auto` transition.
+- Never use shell `taskkill`, `takt exec`, or absolute path guessing when the
+  bridge tools are available.
 
 ## Rules
 
@@ -39,13 +54,13 @@ above the normal Pi editor.
   `takt_exec_prompt` is available. The named profile is the path boundary.
 - Do not use `--continue`. The default tool flow clears the old session and
   starts a fresh `takt exec <preset>`.
-- Do not send the task body and `/go` through separate ad-hoc mechanisms. The
-  tool uses bracketed paste and submits them in order.
+- Do not send the task body and `/go` through separate ad-hoc mechanisms unless
+  recovering inside an already-running `pi-auto` session with `takt_send_input`.
 - If `takt_exec_prompt` is missing, the bridge runtime is not initialized, or
   the profile is missing, stop. Report the exact missing configuration; do not
   guess a repository path or fall back to Claude/Codex/direct shell execution.
 - If the user explicitly requests a different profile, pass that profile name
-  and keep the task body unchanged.
+  and keep the chosen task body unchanged.
 
 ## Explicit invocation
 

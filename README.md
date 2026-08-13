@@ -51,17 +51,21 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 
 The bundled `takt-pi-runner` Agent Skill calls the `takt_exec_prompt` tool for
 the common issue-body → `/go` flow. It uses the `pi-docs` profile by default,
-preserves the prompt exactly, clears the old session, starts a fresh preset,
-and leaves raw output in the stacked Pi widget. If the tool or profile is
-missing, the skill reports the configuration error instead of guessing a path.
+prefers a concise prompt, replaces a running bridge-owned session when needed,
+clears the old session, starts a fresh preset, submits `/go`, and switches to
+`pi-auto`. Raw output stays in the stacked Pi widget; long pastes show a
+truncated preview while `stage` is `pasting` / `sending_go`. Agents can also use
+`takt_stop` and `takt_set_mode` for recovery. If the tool or profile is missing,
+the skill reports the configuration error instead of guessing a path.
 
 After a session is live, dual input modes let you keep talking to TAKT without
 leaving Pi:
 
 - `pi` (default): editor stays on Pi; use `/takt:send` or tools
 - `takt`: keys go to the active bridge-owned PTY; `Esc` returns to `pi`
-- `pi-auto`: Pi can inspect with `takt_read_screen` and send follow-ups with
-  `takt_send_input` (destructive input still confirms)
+- `pi-auto`: entered automatically after a successful `takt_exec_prompt`; Pi can
+  inspect with `takt_read_screen` and send follow-ups with `takt_send_input`
+  (destructive input still confirms)
 
 The current Pi folder plus registered folders are monitored. Active project
 screens are stacked above the normal Pi editor, with the most active project

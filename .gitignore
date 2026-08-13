@@ -26,6 +26,9 @@ coverage/
 .pi/npm/
 .pi/git/
 
+# ralph loop state
+.ralph/
+
 # OS/editor
 .DS_Store
 Thumbs.db

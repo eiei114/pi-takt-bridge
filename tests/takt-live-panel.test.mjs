@@ -88,6 +88,32 @@ test("project stack shows input mode even with no active sessions", () => {
   assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
+test("project stack overlays long prompt previews while pasting", async () => {
+  const liveTerminal = new Terminal({ cols: 40, rows: 8, allowProposedApi: true });
+  await new Promise((resolve) => liveTerminal.write("HUGE PASTED BODY SHOULD BE HIDDEN", resolve));
+  const liveRunner = {
+    terminal: liveTerminal,
+    hasSession: true,
+    isRunning: true,
+    resize() {},
+  };
+  const lines = renderTaktProjectStack([
+    {
+      id: "a",
+      label: "takt",
+      cwd: "C:/repo",
+      runner: liveRunner,
+      stage: "pasting",
+      promptPreview: "## Issue #1331\n…(12 more lines, 900 chars)\n## Done",
+    },
+  ], 40);
+  assert.ok(lines.some((line) => line.includes("stage:pasting")));
+  assert.ok(lines.some((line) => line.includes("prompt preview:")));
+  assert.ok(lines.some((line) => line.includes("Issue #1331")));
+  assert.ok(!lines.some((line) => line.includes("HUGE PASTED BODY SHOULD BE HIDDEN")));
+  liveTerminal.dispose();
+});
+
 test("project stack truncates long paths to the Pi widget width", () => {
   const width = 51;
   const lines = renderTaktProjectStack([

@@ -54,11 +54,17 @@ explicit alias form.
 ## Agent Skill automation
 
 The package includes `takt-pi-runner`. When the user asks Pi to execute an issue
-through TAKT, the skill calls `takt_exec_prompt` with the exact task body. The
-tool resolves the named profile, runs `takt clear`, starts a fresh
+through TAKT, the skill calls `takt_exec_prompt` with a concise task body. The
+tool resolves the named profile, optionally stops a running bridge-owned session
+(`replace: true` by default), runs `takt clear`, starts a fresh
 `takt exec <preset>`, submits the body as a bracketed paste, then submits
-`/go`. It returns after submission while the live raw PTY remains visible in
-the Pi project stack.
+`/go`. It returns after submission, switches input mode to `pi-auto`, and keeps
+the live raw PTY visible in the Pi project stack.
+
+Use `takt_stop` to stop a stuck bridge-owned session without confirmation, and
+`takt_set_mode` for explicit mode changes. `takt_read_screen` reports `stage:`
+so agents can tell `pasting` / `sending_go` / `running` apart. During paste
+stages the widget shows a truncated prompt preview instead of the full body.
 
 Force the skill with `/skill:takt-pi-runner <task body>`. If the bridge tool or
 profile is unavailable, the skill stops with a configuration report; it never
@@ -96,9 +102,11 @@ Cycle with `Ctrl+Alt+T` or `/takt:mode`:
 | `takt` | Human keys go to the active bridge-owned TAKT PTY. `Esc` returns to `pi`. |
 | `pi-auto` | Pi may call `takt_read_screen` / `takt_send_input` for short follow-ups. |
 
+`takt_exec_prompt` enters `pi-auto` automatically after a successful submit.
 `takt` and `pi-auto` require a running bridge-owned session. If that session
 exits, the bridge falls back to `pi`. Destructive auto input such as `/clear`
-still asks for confirmation.
+still asks for confirmation. `/takt:stop` keeps an interactive confirm; the
+`takt_stop` tool skips confirm so agents can recover cleanly.
 
 ## Live widget and diagnostics
 

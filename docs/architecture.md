@@ -9,7 +9,8 @@ Pi command / project path
         │
         ├── profile registry ── explicit alias → project cwd + exec preset
         │
-        ├── takt_exec_prompt tool ── clear → fresh exec → prompt → `/go`
+        ├── takt_exec_prompt tool ── replace? → clear → fresh exec → prompt → `/go` → pi-auto
+        ├── takt_stop / takt_set_mode tools ── agent recovery without shell/taskkill
         │
         ├── takt-acp (stdio, ACP) ── enqueue in selected project
         │
@@ -42,8 +43,12 @@ Pi command / project path
   remains the explicit seam, and `/takt:stop` owns stopping bridge children.
 - Optional dual-input modes cycle with a shortcut: `pi` → `takt` (human types
   into the active bridge-owned PTY) → `pi-auto` (Pi may send allowed follow-ups).
-  Destructive auto actions still require confirmation. External status cards are
-  never writable.
+  A successful `takt_exec_prompt` enters `pi-auto` automatically. Destructive
+  auto actions still require confirmation. External status cards are never
+  writable.
+- Exec progress is tracked as stages and shown in tool updates, `takt_read_screen`,
+  and the widget header. During paste stages the widget overlays a truncated
+  prompt preview instead of the full raw body.
 - A run is not assumed to be singular; the summary is derived from all run
   records in the project when the optional diagnostic overlay is requested.
 

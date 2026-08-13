@@ -5,6 +5,11 @@ import {
 } from "@earendil-works/pi-tui";
 import type { Terminal } from "@xterm/headless";
 import {
+  formatTaktExecStage,
+  shouldOverlayPromptPreview,
+  type TaktExecStage,
+} from "./takt-exec-stage.ts";
+import {
   formatTaktInputModeLine,
   type TaktInputMode,
 } from "./takt-input-mode.ts";
@@ -30,6 +35,8 @@ export interface TaktProjectWidgetEntry {
   cwd: string;
   runner?: TaktLiveRunner;
   summary?: TaktSummary;
+  stage?: TaktExecStage;
+  promptPreview?: string;
 }
 
 export interface TaktProjectStackSource {
@@ -141,7 +148,10 @@ export function renderTaktProjectStack(
 ): string[] {
   const columns = normalizeWidgetWidth(width);
   const visibleProjects = [...projects]
-    .filter((project) => project.runner?.hasSession || hasObservedActivity(project.summary))
+    .filter((project) =>
+      project.runner?.hasSession ||
+      hasObservedActivity(project.summary) ||
+      (project.stage !== undefined && project.stage !== "idle"))
     .sort(compareProjectActivity);
   const lines: string[] = [`input: ${formatTaktInputModeLine(inputMode)}`];
   let shownProjects = 0;
@@ -149,7 +159,9 @@ export function renderTaktProjectStack(
   for (const project of visibleProjects) {
     const runner = project.runner;
     const panel = [projectHeader(project)];
-    if (runner?.terminal) {
+    if (shouldOverlayPromptPreview(project.stage) && project.promptPreview) {
+      panel.push(...renderPromptOverlay(project));
+    } else if (runner?.terminal) {
       runner.resize(columns, terminalRows());
       panel.push(...visibleWidgetLines(renderTaktTerminal(runner.terminal), MAX_PROJECT_ROWS - 1));
     } else if (project.summary) {
@@ -191,7 +203,19 @@ export function fitTaktWidgetLines(lines: readonly string[], width: number): str
 function projectHeader(project: TaktProjectWidgetEntry): string {
   const runner = project.runner;
   const state = runner?.isRunning ? "● live" : runner?.hasSession ? "■ finished" : "◌ observed";
-  return `TAKT [${project.label}] ${state} · ${project.cwd}`;
+  const stage = project.stage && project.stage !== "idle"
+    ? ` · stage:${formatTaktExecStage(project.stage)}`
+    : "";
+  return `TAKT [${project.label}] ${state}${stage} · ${project.cwd}`;
+}
+
+function renderPromptOverlay(project: TaktProjectWidgetEntry): string[] {
+  const preview = project.promptPreview?.trim() || "(prompt body omitted)";
+  return [
+    `stage: ${formatTaktExecStage(project.stage ?? "pasting")}`,
+    "prompt preview:",
+    ...preview.split("\n").slice(0, MAX_PROJECT_ROWS - 3),
+  ];
 }
 
 function renderObservedProject(summary: TaktSummary): string[] {
