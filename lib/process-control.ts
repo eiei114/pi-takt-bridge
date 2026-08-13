@@ -1,4 +1,12 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+
+export function spawnCommand(command: string, args: string[], options: SpawnOptions): ChildProcess {
+  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
+    const commandLine = [command, ...args].map(quoteWindowsArg).join(" ");
+    return spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", commandLine], options);
+  }
+  return spawn(command, args, options);
+}
 
 /** Stop a child with a graceful signal, then kill its process tree if needed. */
 export async function stopChild(
@@ -70,4 +78,11 @@ async function killWindowsProcessTree(pid: number): Promise<void> {
     killer.once("close", finish);
     killer.once("error", finish);
   });
+}
+
+function quoteWindowsArg(value: string): string {
+  if (/^[A-Za-z0-9_./\\:-]+$/.test(value)) {
+    return value;
+  }
+  return `"${value.replaceAll('"', '\\"')}"`;
 }

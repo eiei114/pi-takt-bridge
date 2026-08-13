@@ -1,6 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { stopChild } from "./process-control.ts";
-import { resolveCommand, usesWindowsShell } from "./takt-state.ts";
+import { type ChildProcess } from "node:child_process";
+import { spawnCommand, stopChild } from "./process-control.ts";
+import { resolveCommand } from "./takt-state.ts";
 
 export interface TaktRunControllerOptions {
   cwd: string;
@@ -28,11 +28,10 @@ export class TaktRunController {
     }
 
     const command = resolveCommand(this.options.command ?? process.env.TAKT_COMMAND ?? "takt");
-    const child = spawn(command, ["run"], {
+    const child = spawnCommand(command, ["run"], {
       cwd: this.options.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      shell: usesWindowsShell(command),
     });
     this.child = child;
     this.outputBuffer = "";

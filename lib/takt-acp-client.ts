@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import {
   client,
@@ -12,8 +12,8 @@ import {
   type PromptResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
-import { stopChild } from "./process-control.ts";
-import { resolveCommand, usesWindowsShell } from "./takt-state.ts";
+import { spawnCommand, stopChild } from "./process-control.ts";
+import { resolveCommand } from "./takt-state.ts";
 
 export interface TaktAcpClientOptions {
   cwd: string;
@@ -78,11 +78,10 @@ export class TaktAcpClient {
     }
 
     const command = resolveCommand(this.options.command ?? process.env.TAKT_ACP_COMMAND ?? "takt-acp");
-    const child = spawn(command, [], {
+    const child = spawnCommand(command, [], {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      shell: usesWindowsShell(command),
     });
     this.child = child;
     const stderr = collectStderr(child);
