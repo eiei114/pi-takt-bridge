@@ -1,22 +1,18 @@
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, Text } from "@earendil-works/pi-tui";
 import { readTaktSummary } from "../lib/takt-state.ts";
 import { TaktAcpClient } from "../lib/takt-acp-client.ts";
+import { showTaktLivePanel } from "../lib/takt-live-panel.ts";
 import { TaktRunController } from "../lib/takt-run-controller.ts";
-import { renderTaktDetails, renderTaktWidget } from "../lib/takt-widget.ts";
-import type { TaktSummary } from "../lib/takt-types.ts";
+import { renderTaktDetails } from "../lib/takt-widget.ts";
 
-const WIDGET_KEY = "pi-takt-bridge";
-const REFRESH_INTERVAL_MS = 1_000;
-
-async function showStatus(ctx: ExtensionContext, summary?: TaktSummary): Promise<void> {
+async function showStatus(ctx: ExtensionContext): Promise<void> {
   if (!ctx.hasUI) {
     return;
   }
 
-  const current = summary ?? (await readTaktSummary(ctx.cwd));
-  const lines = renderTaktDetails(current);
-
+  const summary = await readTaktSummary(ctx.cwd);
+  const lines = renderTaktDetails(summary);
   await ctx.ui.custom<void>(
     (_tui, theme, _keybindings, done) => {
       const text = new Text(
@@ -44,30 +40,26 @@ async function showStatus(ctx: ExtensionContext, summary?: TaktSummary): Promise
 class TaktBridgeRuntime {
   private readonly acp: TaktAcpClient;
   private readonly runner: TaktRunController;
-  private readonly cwd: string;
   private context: ExtensionContext | undefined;
-  private timer: ReturnType<typeof setInterval> | undefined;
-  private refreshing = false;
-  private summary: TaktSummary | undefined;
+  private livePanelCloser: (() => void) | undefined;
 
   constructor(cwd: string) {
-    this.cwd = cwd;
     this.acp = new TaktAcpClient({ cwd });
-    this.runner = new TaktRunController({ cwd });
+    this.runner = new TaktRunController({
+      cwd,
+      onExit: ({ code }) => {
+        const context = this.context;
+        if (!context?.hasUI) {
+          return;
+        }
+        const outcome = code === 0 ? "finished" : "exited with errors";
+        context.ui.notify(`TAKT ${outcome} (exit ${code}).`, code === 0 ? "info" : "error");
+      },
+    });
   }
 
   attach(context: ExtensionContext): void {
     this.context = context;
-    if (!context.hasUI) {
-      return;
-    }
-
-    void this.refresh();
-    this.timer = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
-  }
-
-  get currentSummary(): TaktSummary | undefined {
-    return this.summary;
   }
 
   async enqueueTask(task: string): Promise<void> {
@@ -76,16 +68,25 @@ class TaktBridgeRuntime {
       return;
     }
 
-    context.ui.setStatus(WIDGET_KEY, "TAKT: enqueueing…");
     try {
       await this.acp.enqueue(task);
       context.ui.notify("TAKT task queued (worktree run).", "info");
-      await this.refresh();
     } catch (error) {
       context.ui.notify(`TAKT enqueue failed: ${errorMessage(error)}`, "error");
-    } finally {
-      context.ui.setStatus(WIDGET_KEY, undefined);
     }
+  }
+
+  async runOrAttach(): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    if (this.runner.hasSession) {
+      await this.showLive(context);
+      return;
+    }
+    await this.startPending();
   }
 
   async startPending(): Promise<void> {
@@ -95,13 +96,13 @@ class TaktBridgeRuntime {
     }
 
     if (this.runner.isRunning) {
-      context.ui.notify("TAKT is already running.", "warning");
+      await this.showLive(context);
       return;
     }
 
     const confirmed = await context.ui.confirm(
       "Start TAKT",
-      "Run all pending TAKT tasks? Each task keeps TAKT's worktree setting.",
+      "Run all pending TAKT tasks in a live terminal? Each task keeps TAKT's worktree setting.",
     );
     if (!confirmed) {
       return;
@@ -109,10 +110,32 @@ class TaktBridgeRuntime {
 
     try {
       await this.runner.start();
-      context.ui.notify("TAKT run started.", "info");
-      await this.refresh();
+      await this.showLive(context);
     } catch (error) {
       context.ui.notify(`TAKT start failed: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async showLive(context = this.context): Promise<void> {
+    if (!context?.hasUI) {
+      return;
+    }
+    if (!this.runner.hasSession) {
+      context.ui.notify("No TAKT terminal session. Use /takt:start first.", "info");
+      return;
+    }
+    if (this.livePanelCloser) {
+      return;
+    }
+
+    let closePanel: (() => void) | undefined;
+    this.livePanelCloser = () => closePanel?.();
+    try {
+      await showTaktLivePanel(context, this.runner, (close) => {
+        closePanel = close;
+      });
+    } finally {
+      this.livePanelCloser = undefined;
     }
   }
 
@@ -129,7 +152,7 @@ class TaktBridgeRuntime {
 
     const confirmed = await context.ui.confirm(
       "Stop TAKT",
-      "Send an interrupt to the TAKT process? The current task may be marked aborted.",
+      "Send Ctrl-C to the live TAKT process? The current task may be marked aborted.",
     );
     if (!confirmed) {
       return;
@@ -137,38 +160,14 @@ class TaktBridgeRuntime {
 
     await this.runner.stop();
     context.ui.notify("TAKT stop requested.", "info");
-    await this.refresh();
-  }
-
-  async refresh(): Promise<void> {
-    if (this.refreshing) {
-      return;
-    }
-
-    const context = this.context;
-    if (!context?.hasUI) {
-      return;
-    }
-
-    this.refreshing = true;
-    try {
-      this.summary = await readTaktSummary(this.cwd);
-      context.ui.setWidget(WIDGET_KEY, renderTaktWidget(this.summary));
-    } finally {
-      this.refreshing = false;
-    }
   }
 
   async shutdown(): Promise<void> {
-    if (this.timer !== undefined) {
-      clearInterval(this.timer);
-      this.timer = undefined;
-    }
-
-    const context = this.context;
-    context?.ui.setWidget(WIDGET_KEY, undefined);
+    this.livePanelCloser?.();
+    this.livePanelCloser = undefined;
     await this.acp.close();
-    await this.runner.stop();
+    await this.runner.dispose();
+    this.context = undefined;
   }
 }
 
@@ -191,16 +190,23 @@ export default function register(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("takt", {
-    description: "Open the TAKT status overlay",
-    handler: async (_args, context) => {
-      await showStatus(context, runtime?.currentSummary);
+    description: "Run or attach to the live TAKT terminal",
+    handler: async (_args, _context) => {
+      await runtime?.runOrAttach();
+    },
+  });
+
+  pi.registerCommand("takt:live", {
+    description: "Attach to the live TAKT terminal",
+    handler: async (_args, _context) => {
+      await runtime?.showLive();
     },
   });
 
   pi.registerCommand("takt:status", {
-    description: "Open the TAKT status overlay",
+    description: "Open the TAKT diagnostic status overlay",
     handler: async (_args, context) => {
-      await showStatus(context, runtime?.currentSummary);
+      await showStatus(context);
     },
   });
 
@@ -218,7 +224,7 @@ export default function register(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("takt:start", {
-    description: "Start all pending TAKT tasks",
+    description: "Start all pending TAKT tasks in the live terminal",
     handler: async (_args, _context) => {
       await runtime?.startPending();
     },
@@ -232,9 +238,9 @@ export default function register(pi: ExtensionAPI): void {
   });
 
   pi.registerShortcut(Key.ctrlShift("t"), {
-    description: "Open TAKT status",
-    handler: async (context) => {
-      await showStatus(context, runtime?.currentSummary);
+    description: "Run or attach to TAKT live screen",
+    handler: async (_context) => {
+      await runtime?.runOrAttach();
     },
   });
 }

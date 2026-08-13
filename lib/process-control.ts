@@ -59,7 +59,7 @@ export function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boo
   });
 }
 
-async function killWindowsProcessTree(pid: number): Promise<void> {
+export async function killWindowsProcessTree(pid: number): Promise<void> {
   await new Promise<void>((resolve) => {
     let settled = false;
     const finish = () => {

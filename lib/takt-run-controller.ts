@@ -1,25 +1,53 @@
-import { type ChildProcess } from "node:child_process";
-import { spawnCommand, stopChild } from "./process-control.ts";
+import xterm from "@xterm/headless";
+import { spawn as spawnPty, type IPty } from "node-pty";
+import type { Terminal as XtermTerminal } from "@xterm/headless";
+import { killWindowsProcessTree } from "./process-control.ts";
 import { resolveCommand } from "./takt-state.ts";
+
+const { Terminal } = xterm;
 
 export interface TaktRunControllerOptions {
   cwd: string;
   command?: string;
-  onOutput?: (line: string) => void;
-  onExit?: (result: { code: number | null; signal: NodeJS.Signals | null }) => void;
+  args?: string[];
+  cols?: number;
+  rows?: number;
+  onScreenChange?: () => void;
+  onExit?: (result: { code: number; signal: number | undefined }) => void;
 }
 
+/**
+ * Runs TAKT in a real pseudo-terminal and keeps an xterm-compatible screen
+ * buffer. A pipe is not enough here: TAKT changes its output and input
+ * behavior when stdout/stdin are TTYs.
+ */
 export class TaktRunController {
-  private child: ChildProcess | undefined;
+  private pty: IPty | undefined;
+  private terminalInstance: XtermTerminal | undefined;
+  private exitPromise: Promise<{ code: number; signal: number | undefined }> | undefined;
+  private resolveExit: ((result: { code: number; signal: number | undefined }) => void) | undefined;
   private readonly options: TaktRunControllerOptions;
-  private outputBuffer = "";
+  private readonly screenListeners = new Set<() => void>();
 
   constructor(options: TaktRunControllerOptions) {
     this.options = options;
   }
 
   get isRunning(): boolean {
-    return this.child !== undefined && this.child.exitCode === null && !this.child.killed;
+    return this.pty !== undefined;
+  }
+
+  get hasSession(): boolean {
+    return this.terminalInstance !== undefined;
+  }
+
+  get terminal(): XtermTerminal | undefined {
+    return this.terminalInstance;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.screenListeners.add(listener);
+    return () => this.screenListeners.delete(listener);
   }
 
   async start(): Promise<void> {
@@ -27,82 +55,151 @@ export class TaktRunController {
       return;
     }
 
+    this.terminalInstance?.dispose();
+    const cols = this.options.cols ?? 120;
+    const rows = this.options.rows ?? 30;
+    const terminal = new Terminal({
+      cols,
+      rows,
+      scrollback: 2_000,
+      convertEol: false,
+      allowProposedApi: true,
+    });
     const command = resolveCommand(this.options.command ?? process.env.TAKT_COMMAND ?? "takt");
-    const child = spawnCommand(command, ["run"], {
-      cwd: this.options.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.child = child;
-    this.outputBuffer = "";
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => this.consumeOutput(chunk));
-    child.stderr?.on("data", (chunk: string) => this.consumeOutput(chunk));
+    const args = this.options.args ?? ["run"];
+    const ptyCommand = createPtyCommand(command, args);
 
-    child.once("close", (code, signal) => {
-      if (this.child === child) {
-        this.child = undefined;
-      }
-      this.flushOutput();
-      this.options.onExit?.({ code, signal });
-    });
-
+    let pty: IPty;
     try {
-      await waitForSpawn(child);
+      pty = spawnPty(ptyCommand.file, ptyCommand.args, {
+        cwd: this.options.cwd,
+        cols,
+        rows,
+        name: "xterm-256color",
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+          FORCE_COLOR: "1",
+        },
+        ...(process.platform !== "win32" ? { encoding: "utf8" } : {}),
+        // winpty is more reliable than ConPTY for a nested Windows terminal
+        // and still provides the TTY semantics TAKT needs.
+        ...(process.platform === "win32" ? { useConpty: false } : {}),
+      });
     } catch (error) {
-      this.child = undefined;
+      terminal.dispose();
       throw error;
+    }
+
+    this.terminalInstance = terminal;
+    this.pty = pty;
+    this.exitPromise = new Promise((resolve) => {
+      this.resolveExit = resolve;
+    });
+
+    pty.onData((data) => {
+      terminal.write(data, () => this.notifyScreenChange());
+    });
+    pty.onExit(({ exitCode, signal }) => {
+      const result = { code: exitCode, signal };
+      if (this.pty === pty) {
+        this.pty = undefined;
+        this.resolveExit?.(result);
+        this.resolveExit = undefined;
+        this.notifyScreenChange();
+        this.options.onExit?.(result);
+      }
+    });
+  }
+
+  private notifyScreenChange(): void {
+    this.options.onScreenChange?.();
+    for (const listener of this.screenListeners) {
+      listener();
+    }
+  }
+
+  write(data: string): void {
+    if (!data || !this.pty) {
+      return;
+    }
+    this.pty.write(data);
+  }
+
+  resize(cols: number, rows: number): void {
+    const safeCols = Math.max(1, Math.floor(cols));
+    const safeRows = Math.max(1, Math.floor(rows));
+    if (this.terminalInstance && (this.terminalInstance.cols !== safeCols || this.terminalInstance.rows !== safeRows)) {
+      this.terminalInstance.resize(safeCols, safeRows);
+    }
+    try {
+      this.pty?.resize(safeCols, safeRows);
+    } catch {
+      // The process may have exited between render and resize.
     }
   }
 
   async stop(): Promise<void> {
-    const child = this.child;
-    if (!child || child.exitCode !== null) {
-      this.child = undefined;
+    const pty = this.pty;
+    const exitPromise = this.exitPromise;
+    if (!pty || !exitPromise) {
       return;
     }
 
-    await stopChild(child, "SIGINT", 1_500);
-    if (this.child === child && child.exitCode !== null) {
-      this.child = undefined;
+    try {
+      // Writing Ctrl-C follows the same path as pressing Ctrl-C in the
+      // terminal and works for both Windows winpty and Unix PTYs.
+      pty.write("\u0003");
+    } catch {
+      // Fall through to the process-tree fallback below.
     }
-  }
 
-  private consumeOutput(chunk: string): void {
-    this.outputBuffer += chunk;
-    const lines = this.outputBuffer.split(/\r?\n/);
-    this.outputBuffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (line.trim()) {
-        this.options.onOutput?.(line.trim());
+    if (await settles(exitPromise, 1_500)) {
+      return;
+    }
+
+    if (this.pty === pty) {
+      if (process.platform === "win32") {
+        await killWindowsProcessTree(pty.pid);
+      } else {
+        try {
+          pty.kill("SIGKILL");
+        } catch {
+          // Best effort; the exit event reconciles state when possible.
+        }
       }
     }
+    await settles(exitPromise, 1_500);
   }
 
-  private flushOutput(): void {
-    if (this.outputBuffer.trim()) {
-      this.options.onOutput?.(this.outputBuffer.trim());
-    }
-    this.outputBuffer = "";
+  async dispose(): Promise<void> {
+    await this.stop();
+    this.terminalInstance?.dispose();
+    this.terminalInstance = undefined;
   }
 }
 
-function waitForSpawn(child: ChildProcess): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onSpawn = () => {
-      cleanup();
-      resolve();
+function createPtyCommand(command: string, args: string[]): { file: string; args: string[] } {
+  if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
+    const commandLine = [command, ...args].map(quoteWindowsArg).join(" ");
+    return {
+      file: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", commandLine],
     };
-    const onError = (error: Error) => {
-      cleanup();
-      reject(error);
-    };
-    const cleanup = () => {
-      child.off("spawn", onSpawn);
-      child.off("error", onError);
-    };
-    child.once("spawn", onSpawn);
-    child.once("error", onError);
-  });
+  }
+  return { file: command, args };
+}
+
+function quoteWindowsArg(value: string): string {
+  if (/^[A-Za-z0-9_./\\:-]+$/.test(value)) {
+    return value;
+  }
+  return `"${value.replaceAll('"', '\\"')}"`;
+}
+
+async function settles<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean> {
+  return Promise.race([
+    promise.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
 }

@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+const xterm = await import("@xterm/headless");
+const { renderTaktTerminal } = await import("../lib/takt-live-panel.ts");
+const Terminal = xterm.default?.Terminal ?? xterm.Terminal;
+
+test("live panel renders the PTY screen instead of raw cursor escapes", async () => {
+  const terminal = new Terminal({ cols: 24, rows: 4, allowProposedApi: true });
+  await new Promise((resolve) => {
+    terminal.write("\u001b[31mRED\u001b[0m\r\nplain\u001b[2;5Hcursor", resolve);
+  });
+
+  const lines = renderTaktTerminal(terminal);
+  assert.match(lines[0], /RED/);
+  assert.match(lines[1], /plai/);
+  assert.ok(lines.some((line) => line.includes("\u001b[")));
+  assert.ok(!lines.some((line) => line.includes("\u001b[2;5H")));
+  terminal.dispose();
+});
