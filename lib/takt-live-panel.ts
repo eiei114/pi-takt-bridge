@@ -1,28 +1,59 @@
 import { CURSOR_MARKER, type Component } from "@earendil-works/pi-tui";
 import type { Terminal } from "@xterm/headless";
-import { TaktRunController } from "./takt-run-controller.ts";
+import type { TaktSummary } from "./takt-types.ts";
 
 const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 30;
 const MAX_WIDGET_ROWS = 10;
+const MAX_PROJECT_ROWS = 8;
+const MAX_STACK_ROWS = 30;
+
+export interface TaktLiveRunner {
+  readonly terminal: Terminal | undefined;
+  readonly hasSession: boolean;
+  readonly isRunning: boolean;
+  resize(columns: number, rows: number): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export interface TaktProjectWidgetEntry {
+  id: string;
+  label: string;
+  cwd: string;
+  runner?: TaktLiveRunner;
+  summary?: TaktSummary;
+}
+
+export interface TaktProjectStackSource {
+  getProjects(): readonly TaktProjectWidgetEntry[];
+  subscribe(listener: () => void): () => void;
+}
 
 /** Create a non-capturing widget that keeps normal Pi visible and focused. */
 export function createTaktLiveWidget(
-  runner: TaktRunController,
+  runner: TaktLiveRunner,
   tui: { requestRender(): void },
 ): Component & { dispose(): void } {
   return new TaktLiveTerminalWidget(runner, tui);
 }
 
+/** Create one stacked widget for all registered TAKT project folders. */
+export function createTaktProjectStackWidget(
+  source: TaktProjectStackSource,
+  tui: { requestRender(): void },
+): Component & { dispose(): void } {
+  return new TaktProjectStackWidget(source, tui);
+}
+
 class TaktLiveTerminalWidget implements Component {
-  private readonly runner: TaktRunController;
+  private readonly runner: TaktLiveRunner;
   private readonly tui: { requestRender(): void };
   private readonly unsubscribe: () => void;
   private lastWidth = 0;
   private lastRows = 0;
 
   constructor(
-    runner: TaktRunController,
+    runner: TaktLiveRunner,
     tui: { requestRender(): void },
   ) {
     this.runner = runner;
@@ -60,6 +91,119 @@ class TaktLiveTerminalWidget implements Component {
   }
 }
 
+class TaktProjectStackWidget implements Component {
+  private readonly source: TaktProjectStackSource;
+  private readonly tui: { requestRender(): void };
+  private readonly unsubscribe: () => void;
+
+  constructor(
+    source: TaktProjectStackSource,
+    tui: { requestRender(): void },
+  ) {
+    this.source = source;
+    this.tui = tui;
+    this.unsubscribe = source.subscribe(() => {
+      this.invalidate();
+      this.tui.requestRender();
+    });
+  }
+
+  render(width: number): string[] {
+    return renderTaktProjectStack(this.source.getProjects(), Math.max(1, Math.floor(width || DEFAULT_COLUMNS)));
+  }
+
+  invalidate(): void {
+    // Projects and terminal buffers are read directly on every render.
+  }
+
+  dispose(): void {
+    this.unsubscribe();
+  }
+}
+
+export function renderTaktProjectStack(
+  projects: readonly TaktProjectWidgetEntry[],
+  width: number,
+): string[] {
+  const visibleProjects = [...projects]
+    .filter((project) => project.runner?.hasSession || hasObservedActivity(project.summary))
+    .sort(compareProjectActivity);
+  const lines: string[] = [];
+  let shownProjects = 0;
+
+  for (const project of visibleProjects) {
+    const runner = project.runner;
+    const panel = [projectHeader(project)];
+    if (runner?.terminal) {
+      runner.resize(width, terminalRows());
+      panel.push(...visibleWidgetLines(renderTaktTerminal(runner.terminal), MAX_PROJECT_ROWS - 1));
+    } else if (project.summary) {
+      panel.push(...renderObservedProject(project.summary));
+    } else {
+      panel.push("waiting for TAKT activity...");
+    }
+
+    if (lines.length + panel.length > MAX_STACK_ROWS) {
+      break;
+    }
+    lines.push(...panel);
+    shownProjects += 1;
+  }
+
+  if (visibleProjects.length === 0) {
+    return ["TAKT projects: no active sessions."];
+  }
+  if (shownProjects < visibleProjects.length) {
+    const more = `… ${visibleProjects.length - shownProjects} more TAKT projects`;
+    if (lines.length >= MAX_STACK_ROWS) {
+      lines[MAX_STACK_ROWS - 1] = more;
+    } else {
+      lines.push(more);
+    }
+  }
+  return lines;
+}
+
+function projectHeader(project: TaktProjectWidgetEntry): string {
+  const runner = project.runner;
+  const state = runner?.isRunning ? "● live" : runner?.hasSession ? "■ finished" : "◌ observed";
+  return `TAKT [${project.label}] ${state} · ${project.cwd}`;
+}
+
+function renderObservedProject(summary: TaktSummary): string[] {
+  const lines = [
+    `status: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked`,
+  ];
+  const run = summary.runs[0];
+  if (run) {
+    lines.push(`↳ ${run.status}: ${run.task}${run.currentStep ? ` · ${run.currentStep}` : ""}`);
+  }
+  lines.push("↳ external TAKT session: raw PTY screen unavailable");
+  return lines.slice(0, MAX_PROJECT_ROWS - 1);
+}
+
+function hasObservedActivity(summary: TaktSummary | undefined): boolean {
+  return summary !== undefined && (
+    summary.running > 0 ||
+    summary.pending > 0 ||
+    summary.blocked > 0 ||
+    summary.failed > 0 ||
+    summary.stale > 0
+  );
+}
+
+function compareProjectActivity(left: TaktProjectWidgetEntry, right: TaktProjectWidgetEntry): number {
+  return projectActivityScore(right) - projectActivityScore(left) || left.label.localeCompare(right.label);
+}
+
+function projectActivityScore(project: TaktProjectWidgetEntry): number {
+  if (project.runner?.isRunning) return 4;
+  if (project.runner?.hasSession) return 3;
+  if (project.summary?.running) return 2;
+  if (project.summary && hasObservedActivity(project.summary)) return 1;
+  return 0;
+}
+
 export function renderTaktTerminal(terminal: Terminal, options: { showCursor?: boolean } = {}): string[] {
   const buffer = terminal.buffer.active;
   const lines: string[] = [];
@@ -73,13 +217,13 @@ export function renderTaktTerminal(terminal: Terminal, options: { showCursor?: b
   return lines;
 }
 
-function visibleWidgetLines(lines: string[]): string[] {
+export function visibleWidgetLines(lines: string[], maxRows = MAX_WIDGET_ROWS): string[] {
   const lastContent = lines.reduce((last, line, index) => (stripTerminalSequences(line).trim() ? index : last), -1);
   if (lastContent < 0) {
-    return lines.slice(0, MAX_WIDGET_ROWS);
+    return lines.slice(0, maxRows);
   }
-  const start = Math.max(0, lastContent - MAX_WIDGET_ROWS + 1);
-  return lines.slice(start, Math.min(lines.length, start + MAX_WIDGET_ROWS));
+  const start = Math.max(0, lastContent - maxRows + 1);
+  return lines.slice(start, Math.min(lines.length, start + maxRows));
 }
 
 function stripTerminalSequences(value: string): string {

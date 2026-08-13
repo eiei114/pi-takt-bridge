@@ -3,7 +3,9 @@
 ## Phase 0 — current
 
 - ACP handshake and enqueue path
-- Worktree-preserving `takt run` PTY and live Pi terminal widget
+- Worktree-preserving `takt run` PTY and live Pi project stack widget
+- Registered multi-project folders with external `.takt` state detection
+- Fresh `takt exec` PTY and explicit multiline `/takt:send` input
 - Persistent `.takt/runs/*/meta.json` reconciliation
 - Optional diagnostic overlay and live widget start/stop commands
 
@@ -13,6 +15,7 @@
 - NDJSON detail view linked from the diagnostic overlay
 - Better task/run matching and stale-process diagnostics
 - Windows process integration tests
+- Safe raw-output capture/attach protocol for externally started TAKT sessions
 
 ## Phase 2 — later
 

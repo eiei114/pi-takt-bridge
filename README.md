@@ -6,10 +6,10 @@ leaving the Pi TUI.
 ## Status
 
 This is an early MVP. It deliberately uses TAKT's public `takt-acp` stdio
-interface for enqueueing and runs the public `takt run` CLI inside a real PTY.
+interface for enqueueing and runs public TAKT CLI commands inside real PTYs.
 The live widget renders TAKT's terminal screen (including in-progress output,
 ANSI control sequences, prompts, and the final exit notification) instead of
-reducing execution to a status widget.
+reducing bridge-owned execution to a status widget.
 
 ## Prerequisites
 
@@ -35,15 +35,25 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 |---|---|
 | `/takt` | Start or attach to the live TAKT widget |
 | `/takt:live` | Show the current live/final TAKT widget |
-| `/takt:enqueue` | Ask TAKT ACP to add a worktree task, without starting it |
-| `/takt:start` | Confirm and start all pending tasks in the live terminal |
-| `/takt:stop` | Confirm and interrupt the `takt run` process started by Pi |
+| `/takt:enqueue [path]` | Ask TAKT ACP to add a worktree task in a selected folder |
+| `/takt:project [path]` | Register another repo/folder for detection and stacked display |
+| `/takt:project:remove [path]` | Stop watching a registered folder |
+| `/takt:start [path]` | Confirm and start pending tasks in the selected folder |
+| `/takt:clear [path]` | Clear the selected project's previous TAKT exec session |
+| `/takt:exec [path]` | Start a fresh interactive `takt exec` PTY in a selected folder |
+| `/takt:send [path]` | Paste multiline input into a bridge-owned interactive TAKT session |
+| `/takt:stop [path]` | Confirm and interrupt a TAKT process started by Pi |
 | `/takt:status` | Open the optional diagnostic state overlay |
 
-The live TAKT output is shown above the normal Pi editor as a non-capturing
-widget. Pi remains visible and keeps focus; TAKT output updates during
-execution, and the final screen remains after exit. Use `/takt:stop` to stop
-TAKT. Pi input is not forwarded to the widget in this MVP.
+The current Pi folder plus registered folders are monitored. Active project
+screens are stacked above the normal Pi editor, with the most active project
+first. Bridge-owned PTYs show raw TAKT output. A TAKT process started in another
+terminal can be detected from its `.takt` state, but its original PTY cannot be
+attached safely; that project is shown as an external status card instead.
+
+Pi remains visible and keeps focus. Use `/takt:send` for explicit pasted input
+to a bridge-owned `takt exec`; keyboard input is never forwarded implicitly.
+Registered folders are saved outside the vault in the user config directory.
 
 ## Configuration
 

@@ -1,30 +1,36 @@
 # Architecture
 
 ```text
-Pi command / shortcut
+Pi command / project path
         │
-        ├── takt-acp (stdio, ACP) ── enqueue task
+        ├── project registry ── current cwd + registered repo/folder paths
+        │                         │
+        │                         └── `.takt` metadata polling for external runs
         │
-        └── node-pty → takt run ── TAKT worktree execution
+        ├── takt-acp (stdio, ACP) ── enqueue in selected project
+        │
+        └── node-pty → `takt run` / `takt exec` in selected project
                          │
-              ANSI/TTY output
+              ANSI/TTY output → xterm headless screen buffer
                          │
-                 xterm headless screen buffer
-                         │
-                    Pi live terminal widget
+              Pi stacked project live widget
 ```
 
 ## Boundaries
 
 - ACP is the primary protocol for enqueueing.
-- The CLI is used through a PTY for the public `takt run` execution entry point
-  so TAKT sees a real terminal and keeps its normal screen behavior.
+- Public TAKT CLI commands are used through a PTY so TAKT sees a real terminal
+  and keeps its normal screen behavior.
 - `.takt/runs/*/meta.json` is the persistent run state source. NDJSON logs are
   a diagnostic source; they are not used to replace the live terminal output.
-- The live widget is a terminal screen, not a parsed status summary. It is
-  rendered above the normal Pi editor without capturing focus.
-- Pi input is not forwarded to TAKT in this MVP. `/takt:stop` owns stopping the
-  child; normal Pi shortcuts remain normal Pi shortcuts.
+- Each bridge-owned project has one PTY/xterm screen. Projects are rendered as
+  a single stacked widget above the normal Pi editor, with active projects first.
+- External project processes can be detected from `.takt` metadata, but their
+  original PTY is not attachable safely. They use a status card; only
+  bridge-owned projects show raw output.
+- Pi input is not forwarded implicitly. `/takt:send` is the explicit input seam;
+  `/takt:stop` owns stopping bridge children. Normal Pi shortcuts remain normal
+  Pi shortcuts.
 - A run is not assumed to be singular; the summary is derived from all run
   records in the project when the optional diagnostic overlay is requested.
 

@@ -23,6 +23,7 @@ export interface TaktRunControllerOptions {
  */
 export class TaktRunController {
   private pty: IPty | undefined;
+  private lastPty: IPty | undefined;
   private terminalInstance: XtermTerminal | undefined;
   private exitPromise: Promise<{ code: number; signal: number | undefined }> | undefined;
   private resolveExit: ((result: { code: number; signal: number | undefined }) => void) | undefined;
@@ -50,7 +51,7 @@ export class TaktRunController {
     return () => this.screenListeners.delete(listener);
   }
 
-  async start(): Promise<void> {
+  async start(args = this.options.args ?? ["run"]): Promise<void> {
     if (this.isRunning) {
       return;
     }
@@ -66,7 +67,6 @@ export class TaktRunController {
       allowProposedApi: true,
     });
     const command = resolveCommand(this.options.command ?? process.env.TAKT_COMMAND ?? "takt");
-    const args = this.options.args ?? ["run"];
     const ptyCommand = createPtyCommand(command, args);
 
     let pty: IPty;
@@ -93,6 +93,7 @@ export class TaktRunController {
 
     this.terminalInstance = terminal;
     this.pty = pty;
+    this.lastPty = pty;
     this.exitPromise = new Promise((resolve) => {
       this.resolveExit = resolve;
     });
@@ -108,8 +109,20 @@ export class TaktRunController {
         this.resolveExit = undefined;
         this.notifyScreenChange();
         this.options.onExit?.(result);
+        disposePty(pty);
       }
     });
+  }
+
+  write(data: string): void {
+    if (!data || !this.pty) {
+      return;
+    }
+    this.pty.write(data);
+  }
+
+  async waitForExit(): Promise<{ code: number; signal: number | undefined } | undefined> {
+    return this.exitPromise;
   }
 
   private notifyScreenChange(): void {
@@ -167,6 +180,10 @@ export class TaktRunController {
 
   async dispose(): Promise<void> {
     await this.stop();
+    if (this.lastPty) {
+      disposePty(this.lastPty);
+    }
+    this.lastPty = undefined;
     this.terminalInstance?.dispose();
     this.terminalInstance = undefined;
   }
@@ -195,4 +212,37 @@ async function settles<T>(promise: Promise<T>, timeoutMs: number): Promise<boole
     promise.then(() => true),
     new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
   ]);
+}
+
+function disposePty(pty: IPty): void {
+  try {
+    const destroyable = pty as IPty & { destroy?: () => void };
+    if (destroyable.destroy) {
+      destroyable.destroy();
+    } else {
+      pty.kill();
+    }
+  } catch {
+    try {
+      pty.kill();
+    } catch {
+      // Best effort cleanup for PTY handles after the child has exited.
+    }
+  }
+
+  if (process.platform === "win32") {
+    // node-pty's winpty path does not always dispose its conout worker when a
+    // process exits naturally. Close that internal worker/socket so a short
+    // `takt clear` or `takt exec` does not keep the Pi process alive.
+    const internal = pty as unknown as {
+      _agent?: { _conoutSocketWorker?: { dispose(): void } };
+      _socket?: { destroy(): void };
+    };
+    try {
+      internal._agent?._conoutSocketWorker?.dispose();
+      internal._socket?.destroy();
+    } catch {
+      // Best effort cleanup; the public PTY lifecycle remains authoritative.
+    }
+  }
 }
