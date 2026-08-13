@@ -7,7 +7,7 @@ leaving the Pi TUI.
 
 This is an early MVP. It deliberately uses TAKT's public `takt-acp` stdio
 interface for enqueueing and runs the public `takt run` CLI inside a real PTY.
-The live panel renders TAKT's terminal screen (including in-progress output,
+The live widget renders TAKT's terminal screen (including in-progress output,
 ANSI control sequences, prompts, and the final exit notification) instead of
 reducing execution to a status widget.
 
@@ -33,18 +33,17 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 
 | Command | Purpose |
 |---|---|
-| `/takt` | Start or attach to the live TAKT terminal |
-| `/takt:live` | Attach to the current live/final TAKT terminal screen |
+| `/takt` | Start or attach to the live TAKT widget |
+| `/takt:live` | Show the current live/final TAKT widget |
 | `/takt:enqueue` | Ask TAKT ACP to add a worktree task, without starting it |
 | `/takt:start` | Confirm and start all pending tasks in the live terminal |
 | `/takt:stop` | Confirm and interrupt the `takt run` process started by Pi |
 | `/takt:status` | Open the optional diagnostic state overlay |
-| `Ctrl+Shift+T` | Start/attach to the live TAKT screen; press it again to return |
 
-While the live panel is focused, input is forwarded to TAKT as-is. `Escape` is
-also forwarded to TAKT; use `Ctrl+Shift+T` to return to Pi and `Ctrl+C` to stop
-the child. When TAKT exits, the final screen remains visible and Pi reports the
-exit code.
+The live TAKT output is shown above the normal Pi editor as a non-capturing
+widget. Pi remains visible and keeps focus; TAKT output updates during
+execution, and the final screen remains after exit. Use `/takt:stop` to stop
+TAKT. Pi input is not forwarded to the widget in this MVP.
 
 ## Configuration
 

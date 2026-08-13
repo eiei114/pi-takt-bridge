@@ -7,11 +7,11 @@ Pi command / shortcut
         │
         └── node-pty → takt run ── TAKT worktree execution
                          │
-              ANSI/TTY output + input forwarding
+              ANSI/TTY output
                          │
                  xterm headless screen buffer
                          │
-                    Pi live terminal panel
+                    Pi live terminal widget
 ```
 
 ## Boundaries
@@ -21,8 +21,10 @@ Pi command / shortcut
   so TAKT sees a real terminal and keeps its normal screen behavior.
 - `.takt/runs/*/meta.json` is the persistent run state source. NDJSON logs are
   a diagnostic source; they are not used to replace the live terminal output.
-- The live panel is a terminal screen, not a parsed status summary. Input is
-  forwarded to the PTY, except `Ctrl+Shift+T` (detach) and `Ctrl+C` (stop).
+- The live widget is a terminal screen, not a parsed status summary. It is
+  rendered above the normal Pi editor without capturing focus.
+- Pi input is not forwarded to TAKT in this MVP. `/takt:stop` owns stopping the
+  child; normal Pi shortcuts remain normal Pi shortcuts.
 - A run is not assumed to be singular; the summary is derived from all run
   records in the project when the optional diagnostic overlay is requested.
 

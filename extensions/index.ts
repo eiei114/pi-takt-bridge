@@ -1,10 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey, Text } from "@earendil-works/pi-tui";
+import { matchesKey, Text } from "@earendil-works/pi-tui";
 import { readTaktSummary } from "../lib/takt-state.ts";
 import { TaktAcpClient } from "../lib/takt-acp-client.ts";
-import { showTaktLivePanel } from "../lib/takt-live-panel.ts";
+import { createTaktLiveWidget } from "../lib/takt-live-panel.ts";
 import { TaktRunController } from "../lib/takt-run-controller.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
+
+const WIDGET_KEY = "pi-takt-bridge-live";
 
 async function showStatus(ctx: ExtensionContext): Promise<void> {
   if (!ctx.hasUI) {
@@ -41,7 +43,7 @@ class TaktBridgeRuntime {
   private readonly acp: TaktAcpClient;
   private readonly runner: TaktRunController;
   private context: ExtensionContext | undefined;
-  private livePanelCloser: (() => void) | undefined;
+  private liveWidgetVisible = false;
 
   constructor(cwd: string) {
     this.acp = new TaktAcpClient({ cwd });
@@ -116,7 +118,7 @@ class TaktBridgeRuntime {
     }
   }
 
-  async showLive(context = this.context): Promise<void> {
+  showLive(context = this.context): void {
     if (!context?.hasUI) {
       return;
     }
@@ -124,19 +126,16 @@ class TaktBridgeRuntime {
       context.ui.notify("No TAKT terminal session. Use /takt:start first.", "info");
       return;
     }
-    if (this.livePanelCloser) {
+    if (this.liveWidgetVisible) {
       return;
     }
 
-    let closePanel: (() => void) | undefined;
-    this.livePanelCloser = () => closePanel?.();
-    try {
-      await showTaktLivePanel(context, this.runner, (close) => {
-        closePanel = close;
-      });
-    } finally {
-      this.livePanelCloser = undefined;
-    }
+    context.ui.setWidget(
+      WIDGET_KEY,
+      (tui) => createTaktLiveWidget(this.runner, tui),
+      { placement: "aboveEditor" },
+    );
+    this.liveWidgetVisible = true;
   }
 
   async stopRunning(): Promise<void> {
@@ -163,8 +162,8 @@ class TaktBridgeRuntime {
   }
 
   async shutdown(): Promise<void> {
-    this.livePanelCloser?.();
-    this.livePanelCloser = undefined;
+    this.context?.ui.setWidget(WIDGET_KEY, undefined);
+    this.liveWidgetVisible = false;
     await this.acp.close();
     await this.runner.dispose();
     this.context = undefined;
@@ -237,10 +236,4 @@ export default function register(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerShortcut(Key.ctrlShift("t"), {
-    description: "Run or attach to TAKT live screen",
-    handler: async (_context) => {
-      await runtime?.runOrAttach();
-    },
-  });
 }

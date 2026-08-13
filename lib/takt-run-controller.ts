@@ -119,13 +119,6 @@ export class TaktRunController {
     }
   }
 
-  write(data: string): void {
-    if (!data || !this.pty) {
-      return;
-    }
-    this.pty.write(data);
-  }
-
   resize(cols: number, rows: number): void {
     const safeCols = Math.max(1, Math.floor(cols));
     const safeRows = Math.max(1, Math.floor(rows));

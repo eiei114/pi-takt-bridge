@@ -3,9 +3,9 @@
 ## Phase 0 — current
 
 - ACP handshake and enqueue path
-- Worktree-preserving `takt run` PTY and live Pi terminal panel
+- Worktree-preserving `takt run` PTY and live Pi terminal widget
 - Persistent `.takt/runs/*/meta.json` reconciliation
-- Optional diagnostic overlay and live screen start/stop commands
+- Optional diagnostic overlay and live widget start/stop commands
 
 ## Phase 1 — next
 

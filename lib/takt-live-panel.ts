@@ -1,45 +1,22 @@
-import { CURSOR_MARKER, matchesKey, type Component } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CURSOR_MARKER, type Component } from "@earendil-works/pi-tui";
 import type { Terminal } from "@xterm/headless";
 import { TaktRunController } from "./takt-run-controller.ts";
 
-
 const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 30;
+const MAX_WIDGET_ROWS = 10;
 
-/** Show the live terminal screen produced by a real TAKT PTY. */
-export async function showTaktLivePanel(
-  ctx: ExtensionContext,
+/** Create a non-capturing widget that keeps normal Pi visible and focused. */
+export function createTaktLiveWidget(
   runner: TaktRunController,
-  onClose?: (close: () => void) => void,
-): Promise<void> {
-  if (!ctx.hasUI || ctx.mode !== "tui" || !runner.hasSession) {
-    return;
-  }
-
-  ctx.ui.notify("TAKT live screen: Ctrl+Shift+T returns to Pi; Ctrl+C stops TAKT.", "info");
-  await ctx.ui.custom<void>(
-    (tui, _theme, _keybindings, done) => {
-      onClose?.(() => done(undefined));
-      const view = new TaktLiveTerminalView(runner, tui, () => done(undefined));
-      return view;
-    },
-    {
-      overlay: true,
-      overlayOptions: {
-        width: "100%",
-        maxHeight: "100%",
-        anchor: "top-left",
-        margin: 0,
-      },
-    },
-  );
+  tui: { requestRender(): void },
+): Component & { dispose(): void } {
+  return new TaktLiveTerminalWidget(runner, tui);
 }
 
-class TaktLiveTerminalView implements Component {
+class TaktLiveTerminalWidget implements Component {
   private readonly runner: TaktRunController;
   private readonly tui: { requestRender(): void };
-  private readonly done: () => void;
   private readonly unsubscribe: () => void;
   private lastWidth = 0;
   private lastRows = 0;
@@ -47,11 +24,9 @@ class TaktLiveTerminalView implements Component {
   constructor(
     runner: TaktRunController,
     tui: { requestRender(): void },
-    done: () => void,
   ) {
     this.runner = runner;
     this.tui = tui;
-    this.done = done;
     this.unsubscribe = runner.subscribe(() => {
       this.invalidate();
       this.tui.requestRender();
@@ -71,7 +46,8 @@ class TaktLiveTerminalView implements Component {
     if (!terminal) {
       return ["TAKT terminal is not available."];
     }
-    return renderTaktTerminal(terminal);
+    const lines = renderTaktTerminal(terminal);
+    return visibleWidgetLines(lines);
   }
 
   invalidate(): void {
@@ -79,36 +55,35 @@ class TaktLiveTerminalView implements Component {
     // to satisfy Component and to document that cached output is not used.
   }
 
-  handleInput(data: string): void {
-    if (matchesKey(data, "shift+ctrl+t") || matchesKey(data, "ctrl+shift+t")) {
-      this.done();
-      return;
-    }
-    if (matchesKey(data, "ctrl+c")) {
-      void this.runner.stop();
-      return;
-    }
-    // Escape and every other key are passed through so TAKT keeps its normal
-    // interactive behavior. Ctrl+Shift+T is the Pi-side detach key.
-    this.runner.write(data);
-  }
-
   dispose(): void {
     this.unsubscribe();
   }
 }
 
-export function renderTaktTerminal(terminal: Terminal): string[] {
+export function renderTaktTerminal(terminal: Terminal, options: { showCursor?: boolean } = {}): string[] {
   const buffer = terminal.buffer.active;
   const lines: string[] = [];
-  const cursorRow = buffer.cursorY;
-  const cursorColumn = buffer.cursorX;
+  const cursorRow = options.showCursor ? buffer.cursorY : -1;
+  const cursorColumn = options.showCursor ? buffer.cursorX : -1;
 
   for (let row = 0; row < terminal.rows; row += 1) {
     const line = buffer.getLine(row);
     lines.push(renderLine(line as unknown as TerminalLine | undefined, terminal.cols, row === cursorRow ? cursorColumn : -1));
   }
   return lines;
+}
+
+function visibleWidgetLines(lines: string[]): string[] {
+  const lastContent = lines.reduce((last, line, index) => (stripTerminalSequences(line).trim() ? index : last), -1);
+  if (lastContent < 0) {
+    return lines.slice(0, MAX_WIDGET_ROWS);
+  }
+  const start = Math.max(0, lastContent - MAX_WIDGET_ROWS + 1);
+  return lines.slice(start, Math.min(lines.length, start + MAX_WIDGET_ROWS));
+}
+
+function stripTerminalSequences(value: string): string {
+  return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "");
 }
 
 interface TerminalLine {
