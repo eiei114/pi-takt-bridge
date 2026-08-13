@@ -1,4 +1,8 @@
-import { CURSOR_MARKER, type Component } from "@earendil-works/pi-tui";
+import {
+  CURSOR_MARKER,
+  truncateToWidth,
+  type Component,
+} from "@earendil-works/pi-tui";
 import type { Terminal } from "@xterm/headless";
 import type { TaktSummary } from "./takt-types.ts";
 
@@ -75,10 +79,10 @@ class TaktLiveTerminalWidget implements Component {
 
     const terminal = this.runner.terminal;
     if (!terminal) {
-      return ["TAKT terminal is not available."];
+      return fitTaktWidgetLines(["TAKT terminal is not available."], columns);
     }
     const lines = renderTaktTerminal(terminal);
-    return visibleWidgetLines(lines);
+    return fitTaktWidgetLines(visibleWidgetLines(lines), columns);
   }
 
   invalidate(): void {
@@ -109,7 +113,7 @@ class TaktProjectStackWidget implements Component {
   }
 
   render(width: number): string[] {
-    return renderTaktProjectStack(this.source.getProjects(), Math.max(1, Math.floor(width || DEFAULT_COLUMNS)));
+    return renderTaktProjectStack(this.source.getProjects(), normalizeWidgetWidth(width));
   }
 
   invalidate(): void {
@@ -125,6 +129,7 @@ export function renderTaktProjectStack(
   projects: readonly TaktProjectWidgetEntry[],
   width: number,
 ): string[] {
+  const columns = normalizeWidgetWidth(width);
   const visibleProjects = [...projects]
     .filter((project) => project.runner?.hasSession || hasObservedActivity(project.summary))
     .sort(compareProjectActivity);
@@ -135,7 +140,7 @@ export function renderTaktProjectStack(
     const runner = project.runner;
     const panel = [projectHeader(project)];
     if (runner?.terminal) {
-      runner.resize(width, terminalRows());
+      runner.resize(columns, terminalRows());
       panel.push(...visibleWidgetLines(renderTaktTerminal(runner.terminal), MAX_PROJECT_ROWS - 1));
     } else if (project.summary) {
       panel.push(...renderObservedProject(project.summary));
@@ -151,7 +156,7 @@ export function renderTaktProjectStack(
   }
 
   if (visibleProjects.length === 0) {
-    return ["TAKT projects: no active sessions."];
+    return fitTaktWidgetLines(["TAKT projects: no active sessions."], columns);
   }
   if (shownProjects < visibleProjects.length) {
     const more = `… ${visibleProjects.length - shownProjects} more TAKT projects`;
@@ -161,7 +166,13 @@ export function renderTaktProjectStack(
       lines.push(more);
     }
   }
-  return lines;
+  return fitTaktWidgetLines(lines, columns);
+}
+
+/** Keep custom widget output inside Pi's terminal-width invariant. */
+export function fitTaktWidgetLines(lines: readonly string[], width: number): string[] {
+  const columns = normalizeWidgetWidth(width);
+  return lines.map((line) => truncateToWidth(line, columns));
 }
 
 function projectHeader(project: TaktProjectWidgetEntry): string {
@@ -212,7 +223,12 @@ export function renderTaktTerminal(terminal: Terminal, options: { showCursor?: b
 
   for (let row = 0; row < terminal.rows; row += 1) {
     const line = buffer.getLine(row);
-    lines.push(renderLine(line as unknown as TerminalLine | undefined, terminal.cols, row === cursorRow ? cursorColumn : -1));
+    const rendered = renderLine(
+      line as unknown as TerminalLine | undefined,
+      terminal.cols,
+      row === cursorRow ? cursorColumn : -1,
+    );
+    lines.push(truncateToWidth(rendered, Math.max(1, terminal.cols)));
   }
   return lines;
 }
@@ -341,4 +357,8 @@ function rgbBlue(color: number): number {
 function terminalRows(): number {
   const rows = process.stdout.rows;
   return Math.max(4, Number.isInteger(rows) && rows > 0 ? rows : DEFAULT_ROWS);
+}
+
+function normalizeWidgetWidth(width: number): number {
+  return Math.max(1, Math.floor(width || DEFAULT_COLUMNS));
 }

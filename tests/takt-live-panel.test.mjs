@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const xterm = await import("@xterm/headless");
+const { visibleWidth } = await import("@earendil-works/pi-tui");
 const { createTaktLiveWidget, renderTaktProjectStack, renderTaktTerminal } = await import("../lib/takt-live-panel.ts");
 const Terminal = xterm.default?.Terminal ?? xterm.Terminal;
 
@@ -73,4 +74,30 @@ test("project stack keeps live screens and external project status together", as
   assert.ok(lines.some((line) => line.includes("repo-a live output")));
   assert.ok(lines.some((line) => line.includes("external TAKT session")));
   liveTerminal.dispose();
+});
+
+test("project stack truncates long paths to the Pi widget width", () => {
+  const width = 51;
+  const lines = renderTaktProjectStack([
+    {
+      id: "long-path",
+      label: "pi-docs",
+      cwd: "C:/Users/Keisu/Projects/OSS/takt",
+      summary: {
+        cwd: "C:/Users/Keisu/Projects/OSS/takt",
+        running: 1,
+        pending: 0,
+        blocked: 0,
+        failed: 0,
+        completed: 0,
+        stale: 0,
+        runs: [{ slug: "run", task: "docs", workflow: "default", status: "running" }],
+      },
+    },
+  ], width);
+
+  assert.ok(lines.length > 0);
+  for (const [index, line] of lines.entries()) {
+    assert.ok(visibleWidth(line) <= width, `line ${index} exceeds ${width}: ${visibleWidth(line)} columns`);
+  }
 });
