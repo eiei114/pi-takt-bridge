@@ -7,6 +7,8 @@ Pi command / project path
         │                         │
         │                         └── `.takt` metadata polling for external runs
         │
+        ├── profile registry ── explicit alias → project cwd + exec preset
+        │
         ├── takt-acp (stdio, ACP) ── enqueue in selected project
         │
         └── node-pty → `takt run` / `takt exec` in selected project
@@ -25,6 +27,9 @@ Pi command / project path
   a diagnostic source; they are not used to replace the live terminal output.
 - Each bridge-owned project has one PTY/xterm screen. Projects are rendered as
   a single stacked widget above the normal Pi editor, with active projects first.
+- Named profiles persist an explicit alias, project cwd, and optional exec preset
+  in the user config directory. The bridge does not scan arbitrary folders or
+  silently guess a similarly named repository.
 - External project processes can be detected from `.takt` metadata, but their
   original PTY is not attachable safely. They use a status card; only
   bridge-owned projects show raw output.

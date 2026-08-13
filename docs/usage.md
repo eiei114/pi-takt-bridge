@@ -25,6 +25,32 @@ child does not exit.
 registry is stored in the user config directory, not in the vault. The current
 Pi folder is always included.
 
+### Named project profiles
+
+Use a profile when a project is used repeatedly. Register the path and default
+exec preset once:
+
+```text
+/takt:profile:add pi-docs
+```
+
+Enter `C:\\Users\\Keisu\\Projects\\OSS\\takt` as the folder and `pi-docs` as
+the optional preset. Later, the profile name resolves to that folder for all
+project-targeting commands:
+
+```text
+/takt:clear pi-docs
+/takt:exec pi-docs
+/takt:send pi-docs
+/takt:status pi-docs
+```
+
+`/takt:profile` lists saved profiles and `/takt:profile:remove pi-docs` removes
+the alias without removing the watched project folder. Profile data lives in
+the user config directory. The bridge never searches arbitrary directories or
+silently selects a similarly named repository. `@pi-docs` is accepted as an
+explicit alias form.
+
 The extension only controls child processes it started. A `takt run` or
 `takt exec` process started in another terminal is observed through `.takt`
 metadata once it creates a run, but Pi cannot safely attach to that terminal's

@@ -5,6 +5,7 @@
 - ACP handshake and enqueue path
 - Worktree-preserving `takt run` PTY and live Pi project stack widget
 - Registered multi-project folders with external `.takt` state detection
+- Named project profiles that resolve a folder and default exec preset once
 - Fresh `takt exec` PTY and explicit multiline `/takt:send` input
 - Persistent `.takt/runs/*/meta.json` reconciliation
 - Optional diagnostic overlay and live widget start/stop commands

@@ -38,6 +38,9 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:enqueue [path]` | Ask TAKT ACP to add a worktree task in a selected folder |
 | `/takt:project [path]` | Register another repo/folder for detection and stacked display |
 | `/takt:project:remove [path]` | Stop watching a registered folder |
+| `/takt:profile:add [name]` | Save a named folder and optional exec preset once |
+| `/takt:profile [name]` | List saved project profiles |
+| `/takt:profile:remove [name]` | Remove a saved project profile |
 | `/takt:start [path]` | Confirm and start pending tasks in the selected folder |
 | `/takt:clear [path]` | Clear the selected project's previous TAKT exec session |
 | `/takt:exec [path]` | Start a fresh interactive `takt exec` PTY in a selected folder |
@@ -53,7 +56,19 @@ attached safely; that project is shown as an external status card instead.
 
 Pi remains visible and keeps focus. Use `/takt:send` for explicit pasted input
 to a bridge-owned `takt exec`; keyboard input is never forwarded implicitly.
-Registered folders are saved outside the vault in the user config directory.
+Registered folders and named profiles are saved outside the vault in the user
+config directory. A profile makes a folder path optional for every command:
+
+```text
+/takt:profile:add pi-docs
+# enter C:\Users\Keisu\Projects\OSS\takt and pi-docs once
+/takt:clear pi-docs
+/takt:exec pi-docs
+```
+
+Profile names also work with an `@` prefix. An Agent Skill alone cannot change
+the child process working directory, so the bridge uses a persistent profile
+instead of silently guessing a path.
 
 ## Configuration
 

@@ -12,6 +12,12 @@ import {
   projectPathKey,
   saveProjectPaths,
 } from "../lib/takt-project-registry.ts";
+import {
+  loadTaktProfiles,
+  normalizeProfileName,
+  saveTaktProfiles,
+  type TaktProjectProfile,
+} from "../lib/takt-profile-registry.ts";
 import { TaktRunController } from "../lib/takt-run-controller.ts";
 import { readTaktSummary } from "../lib/takt-state.ts";
 import type { TaktSummary } from "../lib/takt-types.ts";
@@ -62,6 +68,7 @@ interface ManagedProject {
 
 class TaktBridgeRuntime implements TaktProjectStackSource {
   private readonly projects = new Map<string, ManagedProject>();
+  private readonly profiles = new Map<string, TaktProjectProfile>();
   private readonly listeners = new Set<() => void>();
   private context: ExtensionContext | undefined;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -102,6 +109,14 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         this.ensureProject(cwd);
       } catch {
         // Keep a bad saved path from preventing Pi from starting.
+      }
+    }
+    for (const profile of loadTaktProfiles()) {
+      this.profiles.set(profile.name, profile);
+      try {
+        this.ensureProject(profile.cwd);
+      } catch {
+        // Keep a bad saved profile from preventing Pi from starting.
       }
     }
     await this.refreshProjects();
@@ -183,6 +198,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       return;
     }
 
+    const profile = this.profileForArgument(args);
     const project = await this.selectProject(args, "Start TAKT exec in", (candidate) => !candidate.runner.isRunning);
     if (!project) {
       return;
@@ -192,7 +208,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       context.ui.notify(`TAKT is already running externally in ${project.label}; Pi will not start a duplicate.`, "warning");
       return;
     }
-    const preset = await context.ui.input("TAKT exec preset", "Optional preset, e.g. pi-docs");
+    const preset = profile?.preset ?? await context.ui.input("TAKT exec preset", "Optional preset, e.g. pi-docs");
     if (preset === undefined) {
       return;
     }
@@ -293,6 +309,110 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
   }
 
+  async addProfile(args = ""): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    const nameArgument = args.trim().split(/\s+/)[0] ?? "";
+    const rawName = nameArgument || await context.ui.input("TAKT profile name", "e.g. pi-docs");
+    if (!rawName?.trim()) {
+      return;
+    }
+
+    let name: string;
+    try {
+      name = normalizeProfileName(rawName);
+    } catch (error) {
+      context.ui.notify(`TAKT profile name failed: ${errorMessage(error)}`, "error");
+      return;
+    }
+
+    const rawPath = await context.ui.input(
+      `Folder for ${name}`,
+      this.profiles.get(name)?.cwd ?? context.cwd,
+    );
+    if (!rawPath?.trim()) {
+      return;
+    }
+
+    const current = this.profiles.get(name);
+    const rawPreset = await context.ui.input(
+      `Default exec preset for ${name}`,
+      current?.preset ?? "Optional, e.g. pi-docs",
+    );
+    if (rawPreset === undefined) {
+      return;
+    }
+
+    try {
+      const cwd = normalizeProjectPath(rawPath, context.cwd);
+      const preset = rawPreset.trim();
+      this.profiles.set(name, { name, cwd, ...(preset ? { preset } : {}) });
+      this.ensureProject(cwd);
+      this.persistProfiles();
+      this.persistProjects();
+      await this.refreshProjects();
+      context.ui.notify(
+        `TAKT profile saved: ${name}\n${cwd}${preset ? `\npreset: ${preset}` : ""}\nUse /takt:exec ${name}.`,
+        "info",
+      );
+    } catch (error) {
+      context.ui.notify(`TAKT profile save failed: ${errorMessage(error)}`, "error");
+    }
+  }
+
+  async listProfiles(): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    if (this.profiles.size === 0) {
+      context.ui.notify("No TAKT profiles. Use /takt:profile:add <name> to create one.", "info");
+      return;
+    }
+    const lines = [...this.profiles.values()]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((profile) => `${profile.name} → ${profile.cwd}${profile.preset ? ` (preset: ${profile.preset})` : ""}`);
+    context.ui.notify(lines.join("\n"), "info");
+  }
+
+  async removeProfile(args = ""): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+
+    let name = args.trim();
+    if (!name) {
+      const choices = [...this.profiles.keys()].sort();
+      if (choices.length === 0) {
+        context.ui.notify("No TAKT profiles to remove.", "info");
+        return;
+      }
+      const selected = await context.ui.select("Remove TAKT profile", choices);
+      if (!selected) {
+        return;
+      }
+      name = selected;
+    }
+
+    let normalizedName: string;
+    try {
+      normalizedName = normalizeProfileName(name);
+    } catch (error) {
+      context.ui.notify(`TAKT profile name failed: ${errorMessage(error)}`, "error");
+      return;
+    }
+    if (!this.profiles.delete(normalizedName)) {
+      context.ui.notify(`TAKT profile not found: ${normalizedName}`, "info");
+      return;
+    }
+    this.persistProfiles();
+    context.ui.notify(`TAKT profile removed: ${normalizedName}. The project folder remains registered.`, "info");
+  }
+
   async removeProject(args = ""): Promise<void> {
     const context = this.context;
     if (!context?.hasUI) {
@@ -304,6 +424,16 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
     if (project.runner.isRunning) {
       context.ui.notify("Stop the project before removing it.", "warning");
+      return;
+    }
+    const linkedProfiles = [...this.profiles.values()]
+      .filter((profile) => projectPathKey(profile.cwd) === project.id)
+      .map((profile) => profile.name);
+    if (linkedProfiles.length > 0) {
+      context.ui.notify(
+        `Remove linked TAKT profile first: ${linkedProfiles.join(", ")}. Use /takt:profile:remove.`,
+        "warning",
+      );
       return;
     }
     await project.acp.close();
@@ -382,7 +512,13 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       await project.runner.dispose();
     }));
     this.projects.clear();
+    this.profiles.clear();
     this.context = undefined;
+  }
+
+  resolveTargetPath(args: string, fallbackCwd = this.context?.cwd ?? process.cwd()): string {
+    const profile = this.profileForArgument(args);
+    return profile?.cwd ?? normalizeProjectPath(args, fallbackCwd);
   }
 
   private currentProject(): ManagedProject {
@@ -452,7 +588,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     const normalizedArgs = args.trim();
     if (normalizedArgs) {
       try {
-        const project = this.ensureProject(normalizeProjectPath(normalizedArgs, context.cwd));
+        const project = this.ensureProject(this.resolveTargetPath(normalizedArgs, context.cwd));
         this.persistProjects();
         await this.refreshProject(project);
         return project;
@@ -480,6 +616,18 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     return candidates[choices.indexOf(selected)];
   }
 
+  private profileForArgument(args: string): TaktProjectProfile | undefined {
+    const trimmed = args.trim();
+    if (!trimmed || /\s/.test(trimmed)) {
+      return undefined;
+    }
+    try {
+      return this.profiles.get(normalizeProfileName(trimmed));
+    } catch {
+      return undefined;
+    }
+  }
+
   private hasDisplayableProject(): boolean {
     return [...this.projects.values()].some((project) =>
       project.runner.hasSession || hasSummaryActivity(project.summary),
@@ -491,6 +639,14 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       saveProjectPaths([...this.projects.values()].map((project) => project.cwd));
     } catch (error) {
       this.context?.ui.notify(`TAKT project registry save failed: ${errorMessage(error)}`, "warning");
+    }
+  }
+
+  private persistProfiles(): void {
+    try {
+      saveTaktProfiles([...this.profiles.values()]);
+    } catch (error) {
+      this.context?.ui.notify(`TAKT profile registry save failed: ${errorMessage(error)}`, "warning");
     }
   }
 
@@ -553,7 +709,9 @@ export default function register(pi: ExtensionAPI): void {
     description: "Open the TAKT diagnostic status overlay",
     handler: async (args, context) => {
       try {
-        const cwd = args.trim() ? normalizeProjectPath(args, context.cwd) : context.cwd;
+        const cwd = args.trim()
+          ? runtime?.resolveTargetPath(args, context.cwd) ?? normalizeProjectPath(args, context.cwd)
+          : context.cwd;
         await showStatus(context, cwd);
       } catch (error) {
         context.ui.notify(`TAKT status path failed: ${errorMessage(error)}`, "error");
@@ -578,6 +736,34 @@ export default function register(pi: ExtensionAPI): void {
     description: "Register another repo or development folder for TAKT monitoring",
     handler: async (args, _context) => {
       await runtime?.addProject(args);
+    },
+  });
+
+  pi.registerCommand("takt:profile:add", {
+    description: "Create a named TAKT project profile with an optional exec preset",
+    handler: async (args, _context) => {
+      await runtime?.addProfile(args);
+    },
+  });
+
+  pi.registerCommand("takt:profile:list", {
+    description: "List named TAKT project profiles",
+    handler: async (_args, _context) => {
+      await runtime?.listProfiles();
+    },
+  });
+
+  pi.registerCommand("takt:profile:remove", {
+    description: "Remove a named TAKT project profile",
+    handler: async (args, _context) => {
+      await runtime?.removeProfile(args);
+    },
+  });
+
+  pi.registerCommand("takt:profile", {
+    description: "List named TAKT project profiles",
+    handler: async (_args, _context) => {
+      await runtime?.listProfiles();
     },
   });
 
