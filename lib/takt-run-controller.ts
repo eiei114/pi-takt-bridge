@@ -17,6 +17,16 @@ export interface TaktRunControllerOptions {
 }
 
 /**
+ * Encode one multiline value as a terminal bracketed paste followed by Enter.
+ * TAKT's interactive editor keeps the pasted newlines as one input instead of
+ * treating each line as an immediate command.
+ */
+export function formatTaktPastedInput(value: string): string {
+  const normalized = value.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  return `\u001b[200~${normalized}\u001b[201~\r`;
+}
+
+/**
  * Runs TAKT in a real pseudo-terminal and keeps an xterm-compatible screen
  * buffer. A pipe is not enough here: TAKT changes its output and input
  * behavior when stdout/stdin are TTYs.

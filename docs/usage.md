@@ -51,6 +51,19 @@ the user config directory. The bridge never searches arbitrary directories or
 silently selects a similarly named repository. `@pi-docs` is accepted as an
 explicit alias form.
 
+## Agent Skill automation
+
+The package includes `takt-pi-runner`. When the user asks Pi to execute an issue
+through TAKT, the skill calls `takt_exec_prompt` with the exact task body. The
+tool resolves the named profile, runs `takt clear`, starts a fresh
+`takt exec <preset>`, submits the body as a bracketed paste, then submits
+`/go`. It returns after submission while the live raw PTY remains visible in
+the Pi project stack.
+
+Force the skill with `/skill:takt-pi-runner <task body>`. If the bridge tool or
+profile is unavailable, the skill stops with a configuration report; it never
+falls back to a guessed cwd, direct shell `takt exec`, or another provider.
+
 The extension only controls child processes it started. A `takt run` or
 `takt exec` process started in another terminal is observed through `.takt`
 metadata once it creates a run, but Pi cannot safely attach to that terminal's

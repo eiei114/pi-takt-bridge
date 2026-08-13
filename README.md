@@ -48,6 +48,12 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:stop [path]` | Confirm and interrupt a TAKT process started by Pi |
 | `/takt:status` | Open the optional diagnostic state overlay |
 
+The bundled `takt-pi-runner` Agent Skill calls the `takt_exec_prompt` tool for
+the common issue-body → `/go` flow. It uses the `pi-docs` profile by default,
+preserves the prompt exactly, clears the old session, starts a fresh preset,
+and leaves raw output in the stacked Pi widget. If the tool or profile is
+missing, the skill reports the configuration error instead of guessing a path.
+
 The current Pi folder plus registered folders are monitored. Active project
 screens are stacked above the normal Pi editor, with the most active project
 first. Bridge-owned PTYs show raw TAKT output. A TAKT process started in another

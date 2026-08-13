@@ -9,6 +9,8 @@ Pi command / project path
         │
         ├── profile registry ── explicit alias → project cwd + exec preset
         │
+        ├── takt_exec_prompt tool ── clear → fresh exec → prompt → `/go`
+        │
         ├── takt-acp (stdio, ACP) ── enqueue in selected project
         │
         └── node-pty → `takt run` / `takt exec` in selected project
@@ -30,6 +32,9 @@ Pi command / project path
 - Named profiles persist an explicit alias, project cwd, and optional exec preset
   in the user config directory. The bridge does not scan arbitrary folders or
   silently guess a similarly named repository.
+- The bundled Agent Skill uses `takt_exec_prompt` for the exact prompt
+  submission flow; shell execution is not used as a substitute because it
+  would hide the child PTY from the Pi widget.
 - External project processes can be detected from `.takt` metadata, but their
   original PTY is not attachable safely. They use a status card; only
   bridge-owned projects show raw output.

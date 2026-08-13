@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { matchesKey, Text } from "@earendil-works/pi-tui";
 import { TaktAcpClient } from "../lib/takt-acp-client.ts";
 import {
@@ -18,13 +19,21 @@ import {
   saveTaktProfiles,
   type TaktProjectProfile,
 } from "../lib/takt-profile-registry.ts";
-import { TaktRunController } from "../lib/takt-run-controller.ts";
+import { formatTaktPastedInput, TaktRunController } from "../lib/takt-run-controller.ts";
 import { readTaktSummary } from "../lib/takt-state.ts";
 import type { TaktSummary } from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
 
 const WIDGET_KEY = "pi-takt-bridge-projects";
 const REFRESH_INTERVAL_MS = 2_000;
+
+const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
+  profile: Type.Optional(Type.String({ description: "Named TAKT profile; defaults to pi-docs" })),
+  prompt: Type.String({ description: "Exact task or issue body to paste into TAKT" }),
+  clear: Type.Optional(Type.Boolean({ description: "Run takt clear first; defaults to true" })),
+  preset: Type.Optional(Type.String({ description: "Override the profile's exec preset" })),
+  sendGo: Type.Optional(Type.Boolean({ description: "Submit /go after the body; defaults to true" })),
+});
 
 async function showStatus(ctx: ExtensionContext, cwd = ctx.cwd): Promise<void> {
   if (!ctx.hasUI) {
@@ -281,9 +290,76 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     if (text === undefined || !text.trim()) {
       return;
     }
-    const pastedText = text.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-    project.runner.write(`\u001b[200~${pastedText}\u001b[201~\r`);
+    project.runner.write(formatTaktPastedInput(text));
     context.ui.notify(`Input sent to TAKT ${project.label}.`, "info");
+  }
+
+  async executePrompt(
+    profileName = "pi-docs",
+    prompt: string,
+    options: { clear?: boolean; preset?: string; sendGo?: boolean } = {},
+    signal?: AbortSignal,
+    onUpdate?: (message: string) => void,
+  ): Promise<{ profile: string; cwd: string; preset: string; sentGo: boolean }> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      throw new Error("TAKT bridge requires an interactive Pi UI");
+    }
+    if (!prompt.trim()) {
+      throw new Error("TAKT prompt must not be empty");
+    }
+    throwIfAborted(signal);
+
+    const profile = this.profiles.get(normalizeProfileName(profileName));
+    if (!profile) {
+      throw new Error(`TAKT profile not found: ${profileName}. Use /takt:profile:add ${profileName}.`);
+    }
+    const preset = options.preset?.trim() || profile.preset?.trim();
+    if (!preset) {
+      throw new Error(`TAKT profile has no exec preset: ${profile.name}. Pass preset or update the profile.`);
+    }
+
+    const project = this.ensureProject(profile.cwd);
+    await this.refreshProject(project);
+    if (project.runner.isRunning) {
+      throw new Error(`TAKT is already running in ${project.label}; stop it before starting another exec.`);
+    }
+    if (project.summary?.running) {
+      throw new Error(`TAKT is already running externally in ${project.label}; Pi will not start a duplicate.`);
+    }
+
+    if (options.clear !== false) {
+      onUpdate?.(`Clearing previous TAKT session in ${project.label}…`);
+      await project.runner.start(["clear"]);
+      const clearResult = await project.runner.waitForExit();
+      if (clearResult?.code !== 0) {
+        throw new Error(`takt clear failed in ${project.label} (exit ${clearResult?.code ?? "unknown"})`);
+      }
+      throwIfAborted(signal);
+    }
+
+    onUpdate?.(`Starting takt exec ${preset} in ${project.label}…`);
+    await project.runner.start(["exec", preset]);
+    await this.showLive(false);
+    await delay(250);
+    if (!project.runner.isRunning) {
+      const result = await project.runner.waitForExit();
+      throw new Error(`takt exec exited before input (exit ${result?.code ?? "unknown"})`);
+    }
+    throwIfAborted(signal);
+
+    project.runner.write(formatTaktPastedInput(prompt));
+    const shouldSendGo = options.sendGo !== false && !prompt.trim().endsWith("/go");
+    if (shouldSendGo) {
+      await delay(120);
+      project.runner.write(formatTaktPastedInput("/go"));
+    }
+    context.ui.notify(
+      `TAKT prompt submitted to ${project.label}${shouldSendGo ? " with /go" : ""}. Raw output remains in the Pi widget.`,
+      "info",
+    );
+    this.notifyProjects();
+    return { profile: profile.name, cwd: project.cwd, preset, sentGo: shouldSendGo };
   }
 
   async addProject(args = ""): Promise<void> {
@@ -676,8 +752,54 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new Error("TAKT prompt execution cancelled");
+  }
+}
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 export default function register(pi: ExtensionAPI): void {
   let runtime: TaktBridgeRuntime | undefined;
+
+  pi.registerTool({
+    name: "takt_exec_prompt",
+    label: "TAKT Exec Prompt",
+    description: "Run a task through a named TAKT project profile, show raw output in the Pi widget, and submit /go.",
+    promptSnippet: "Run an exact task prompt through a named TAKT profile with raw Pi TUI output",
+    promptGuidelines: [
+      "Use takt_exec_prompt when the user asks to execute an issue or task through TAKT with Pi agents.",
+      "Pass the user's task body exactly as prompt; default profile pi-docs is explicit and must not be replaced by a guessed path.",
+      "Do not shell out to takt exec when takt_exec_prompt is available; the tool owns the PTY and stacked Pi widget.",
+      "If the tool reports a missing profile or extension, stop and report the missing configuration instead of guessing.",
+    ],
+    parameters: TAKT_EXEC_PROMPT_PARAMETERS,
+    async execute(_toolCallId, params, signal, onUpdate) {
+      const activeRuntime = runtime;
+      if (!activeRuntime) {
+        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
+      }
+      const result = await activeRuntime.executePrompt(
+        params.profile?.trim() || "pi-docs",
+        params.prompt,
+        {
+          clear: params.clear,
+          preset: params.preset,
+          sendGo: params.sendGo,
+        },
+        signal,
+        (message) => onUpdate?.({ content: [{ type: "text", text: message }], details: {} }),
+      );
+      return {
+        content: [{ type: "text", text: `TAKT started: ${result.profile} (${result.preset})\n${result.cwd}` }],
+        details: result,
+        terminate: true,
+      };
+    },
+  });
 
   pi.on("session_start", async (_event, context) => {
     await runtime?.shutdown();
