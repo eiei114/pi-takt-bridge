@@ -1,0 +1,9 @@
+name: CI
+run-name: &pr_event pull_request
+on: *pr_event
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7

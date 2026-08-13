@@ -1,0 +1,85 @@
+{
+  "name": "pi-extension-template",
+  "version": "0.2.0",
+  "description": "Template for building Pi packages with extensions, Agent Skills, prompts, and themes.",
+  "type": "module",
+  "license": "MIT",
+  "author": "YOUR_NAME",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "agent-skill",
+    "typescript"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eiei114/pi-extension-template"
+  },
+  "bugs": {
+    "url": "https://github.com/eiei114/pi-extension-template/issues"
+  },
+  "homepage": "https://github.com/eiei114/pi-extension-template#readme",
+  "files": [
+    "extensions/",
+    "lib/",
+    "skills/",
+    "prompts/",
+    "themes/",
+    "docs/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/greeting.test.mjs tests/format-table.test.mjs tests/config-contract.test.mjs tests/error-contract.test.mjs tests/smoke.test.mjs tests/review-guardrails.test.mjs tests/create-pi-extension-cli.test.mjs",
+    "ci": "npm run typecheck && npm run sync:template && npm test && npm run review:guardrails && npm run pack:check && node --test tests/sync-template.test.mjs",
+    "review:guardrails": "node scripts/check-review-guardrails.mjs",
+    "pack:check": "npm pack --dry-run --workspace create-pi-extension",
+    "sync:template": "bun run scripts/sync-template.ts",
+    "sync:template:check": "bun run scripts/sync-template.ts && node --test tests/sync-template.test.mjs"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/hello.ts",
+      "./extensions/index.ts",
+      "./extensions/tui-dashboard.ts",
+      "./extensions/skill-bridge/index.ts",
+      "./extensions/package-layout/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "themes": [
+      "./themes"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "overrides": {
+    "protobufjs": ">=7.6.3 <8.0.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "^0.83.0",
+    "@earendil-works/pi-ai": "^0.83.0",
+    "@earendil-works/pi-coding-agent": "^0.83.0",
+    "@earendil-works/pi-tui": "^0.83.0",
+    "@types/node": "^26.0.0",
+    "typebox": "latest",
+    "typescript": "^7.0.2"
+  }
+}
