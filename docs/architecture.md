@@ -9,7 +9,7 @@ Pi command / project path
         │
         ├── profile registry ── explicit alias → project cwd + exec preset
         │
-        ├── takt_exec_prompt tool ── reconcile → stop → wait → dispose → clear → fresh exec → prompt → `/go` → pi-auto
+        ├── takt_exec_prompt tool ── reconcile → idempotent stop (owned PTY only) → wait → dispose → clear → fresh exec → prompt → `/go` → pi-auto
         ├── takt_stop / takt_set_mode tools ── agent recovery without shell/taskkill
         │
         ├── takt-acp (stdio, ACP) ── enqueue in selected project
@@ -47,7 +47,8 @@ Pi command / project path
   into the active bridge-owned PTY) → `pi-auto` (Pi may send allowed follow-ups).
   A successful `takt_exec_prompt` enters `pi-auto` automatically. Destructive
   auto actions still require confirmation. External status cards are never
-  writable.
+  writable. Stop retries are bounded; a timeout is returned as an explicit
+  bridge error instead of starting a second process.
 - Exec progress is tracked as stages and shown in tool updates, `takt_read_screen`,
   and the widget header. Natural PTY exits reconcile the controller, retained
   screen session, stage, and last exit before another exec is allowed. During

@@ -55,12 +55,14 @@ explicit alias form.
 ## Agent Skill automation
 
 The package includes `takt-pi-runner`. When the user asks Pi to execute an issue
-through TAKT, the skill calls `takt_exec_prompt` with a concise task body. The
-tool resolves the named profile, reconciles the current session, optionally
-stops a running bridge-owned session, waits for its exit, disposes its PTY and
-screen, then runs `takt clear` and starts a fresh
-`takt exec <preset>`, submits the body as a bracketed paste, then submits
-`/go`. It returns after submission, switches input mode to `pi-auto`, and keeps
+through TAKT, the skill first calls `takt_read_screen` when an existing run
+may be present, then calls `takt_exec_prompt` with a concise task body and
+`replace: true`. The tool resolves the named profile, reconciles the current
+session, stops only a bridge-owned PTY, waits for its exit, disposes its PTY and
+screen, then runs `takt clear` and starts a fresh `takt exec <preset>`, submits
+the body as a bracketed paste, then submits `/go`. With `replace: true`, the
+clear step is mandatory even if `clear: false` is supplied. It returns after
+submission, switches input mode to `pi-auto`, and keeps
 the live raw PTY visible in the Pi project stack.
 
 Use `takt_stop` to stop a stuck bridge-owned session without confirmation, and
@@ -71,8 +73,10 @@ paste stages the widget shows a truncated prompt preview instead of the full
 body.
 
 Force the skill with `/skill:takt-pi-runner <task body>`. If the bridge tool or
-profile is unavailable, the skill stops with a configuration report; it never
-falls back to a guessed cwd, direct shell `takt exec`, or another provider.
+profile is unavailable, or the named profile resolves to a different cwd, the
+skill stops with the exact reload/package or profile/cwd mismatch; it never uses
+`taskkill`, Computer Use, a guessed cwd, direct shell `takt exec`, or another
+provider.
 
 The extension only controls child processes it started. A `takt run` or
 `takt exec` process started in another terminal is observed through `.takt`

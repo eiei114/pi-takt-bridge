@@ -55,7 +55,9 @@ const TAKT_AUTO_SCREEN_ROWS = 24;
 const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
   profile: Type.Optional(Type.String({ description: "Named TAKT profile; defaults to pi-docs" })),
   prompt: Type.String({ description: "Exact task or issue body to paste into TAKT" }),
-  clear: Type.Optional(Type.Boolean({ description: "Run takt clear first; defaults to true" })),
+  clear: Type.Optional(Type.Boolean({
+    description: "Run takt clear first; defaults to true; replace:true always clears",
+  })),
   preset: Type.Optional(Type.String({ description: "Override the profile's exec preset" })),
   sendGo: Type.Optional(Type.Boolean({ description: "Submit /go after the body; defaults to true" })),
   replace: Type.Optional(Type.Boolean({
@@ -338,9 +340,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     try {
       project.runner.reconcile();
       if (project.runner.hasSession) {
-        await project.runner.stop();
-        await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
-        await project.runner.dispose();
+        await stopWaitDispose(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
       }
       await project.runner.start(preset.trim() ? ["exec", preset.trim()] : ["exec"]);
       await this.showLive();
@@ -375,19 +375,21 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
 
     try {
       if (project.runner.hasSession) {
-        await project.runner.dispose();
+        await stopWaitDispose(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
       }
-      await project.runner.start(["clear"]);
-      const result = await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
-      if (!result) {
-        throw new Error(`takt clear did not report an exit in ${project.label}`);
-      }
+      await runTaktClear(project.runner, project.label, TAKT_LIFECYCLE_TIMEOUT_MS);
       await project.runner.dispose();
-      context.ui.notify(
-        `TAKT clear ${result.code === 0 ? "finished" : "failed"} for ${project.label}.`,
-        result.code === 0 ? "info" : "error",
-      );
+      context.ui.notify(`TAKT clear finished for ${project.label}.`, "info");
     } catch (error) {
+      try {
+        await stopWaitDispose(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
+      } catch (cleanupError) {
+        context.ui.notify(
+          `TAKT clear failed for ${project.label}: ${errorMessage(error)}; cleanup failed: ${errorMessage(cleanupError)}`,
+          "error",
+        );
+        return;
+      }
       context.ui.notify(`TAKT clear failed for ${project.label}: ${errorMessage(error)}`, "error");
     }
   }
@@ -573,6 +575,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     const project = this.ensureProject(profile.cwd);
     await this.refreshProject(project);
     const replace = options.replace !== false;
+    const shouldClear = replace || options.clear !== false;
     let replaced = false;
     let preserveExistingSession = false;
 
@@ -591,10 +594,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         if (wasRunning) {
           this.setProjectStage(project, "stopping", onUpdate, `Stopping running TAKT in ${project.label} for replace…`);
         }
-        await project.runner.stop();
-        await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
-        await waitUntilNotRunning(project.runner, signal, TAKT_LIFECYCLE_TIMEOUT_MS);
-        await project.runner.dispose();
+        await stopWaitDispose(project.runner, signal, TAKT_LIFECYCLE_TIMEOUT_MS);
         replaced = wasRunning;
         if (wasRunning) {
           this.setProjectStage(project, "stopped", onUpdate, `Stopped TAKT in ${project.label}.`);
@@ -606,16 +606,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         throw externalSessionError(project);
       }
 
-      if (options.clear !== false) {
+      if (shouldClear) {
         this.setProjectStage(project, "clearing", onUpdate, `Clearing previous TAKT session in ${project.label}…`);
-        await project.runner.start(["clear"]);
-        const clearResult = await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
-        if (!clearResult) {
-          throw new Error(`takt clear did not report an exit in ${project.label}`);
-        }
-        if (clearResult.code !== 0) {
-          throw new Error(`takt clear failed in ${project.label} (exit ${clearResult.code})`);
-        }
+        await runTaktClear(project.runner, project.label, TAKT_LIFECYCLE_TIMEOUT_MS);
         await project.runner.dispose();
         throwIfAborted(signal);
       }
@@ -671,12 +664,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
             `Stopping TAKT in ${project.label} after ${aborted ? "cancel" : "prompt submission failure"}…`,
           );
         }
-        await project.runner.stop();
-        await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
-        await waitUntilNotRunning(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
-        if (project.runner.hasSession) {
-          await project.runner.dispose();
-        }
+        await stopWaitDispose(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
       } catch (cleanupError) {
         this.setProjectStage(project, "failed");
         throw new Error(`${errorMessage(error)}; TAKT cleanup failed: ${errorMessage(cleanupError)}`);
@@ -1246,7 +1234,18 @@ function projectSessionSnapshot(project: ManagedProject): {
       ...(runner.pid !== undefined ? { pid: runner.pid } : {}),
     };
   }
-  if (runner.lastExit || runner.status === "completed") {
+  const observedSummary = project.summary;
+  const bridgeCompleted = runner.lastExit !== undefined || runner.status === "completed";
+  if (
+    observedSummary &&
+    (observedSummary.status === "live" ||
+      (!bridgeCompleted &&
+        (observedSummary.status === "stale" ||
+          (observedSummary.status === "unknown" && observedSummary.running > 0))))
+  ) {
+    return snapshotObservedSummary(observedSummary);
+  }
+  if (bridgeCompleted) {
     return {
       status: "completed",
       stage: project.stage,
@@ -1254,15 +1253,24 @@ function projectSessionSnapshot(project: ManagedProject): {
       ...(runner.lastExit ? { lastExit: runner.lastExit } : {}),
     };
   }
-  if (project.summary) {
-    return {
-      status: project.summary.status,
-      ...(project.summary.stage ? { stage: project.summary.stage } : {}),
-      ...(project.summary.pid !== undefined ? { pid: project.summary.pid } : {}),
-      ...(project.summary.lastExit ? { lastExit: project.summary.lastExit } : {}),
-    };
+  if (observedSummary) {
+    return snapshotObservedSummary(observedSummary);
   }
   return { status: "unknown", stage: project.stage };
+}
+
+function snapshotObservedSummary(summary: TaktSummary): {
+  status: TaktSessionStatus;
+  pid?: number;
+  stage?: string;
+  lastExit?: TaktLastExit;
+} {
+  return {
+    status: summary.status,
+    ...(summary.stage ? { stage: summary.stage } : {}),
+    ...(summary.pid !== undefined ? { pid: summary.pid } : {}),
+    ...(summary.lastExit ? { lastExit: summary.lastExit } : {}),
+  };
 }
 
 function renderSummaryScreen(summary: TaktSummary): string[] {
@@ -1323,10 +1331,41 @@ async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+async function runTaktClear(
+  runner: TaktRunController,
+  projectLabel: string,
+  timeoutMs: number,
+): Promise<void> {
+  let result: Awaited<ReturnType<TaktRunController["waitForExit"]>>;
+  try {
+    await runner.start(["clear"]);
+    result = await runner.waitForExit(timeoutMs);
+  } catch (error) {
+    throw new Error(`takt clear failed in ${projectLabel}: ${errorMessage(error)}`);
+  }
+  if (!result) {
+    throw new Error(`takt clear did not report an exit in ${projectLabel}`);
+  }
+  if (result.code !== 0) {
+    throw new Error(`takt clear failed in ${projectLabel} (exit ${result.code})`);
+  }
+}
+
+async function stopWaitDispose(
+  runner: TaktRunController,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  await runner.stop();
+  await runner.waitForExit(timeoutMs);
+  await waitUntilNotRunning(runner, signal, timeoutMs);
+  await runner.dispose();
+}
+
 async function waitUntilNotRunning(
   runner: TaktRunController,
-  signal?: AbortSignal,
-  timeoutMs = 5_000,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (runner.isRunning && Date.now() < deadline) {

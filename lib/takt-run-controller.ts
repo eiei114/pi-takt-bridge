@@ -8,6 +8,9 @@ import type { TaktLastExit, TaktSessionStatus } from "./takt-types.ts";
 const { Terminal } = xterm;
 const STOP_GRACE_MS = 1_500;
 
+type InterruptPty = (pty: IPty) => void;
+type ForceKillPty = (pty: IPty) => Promise<void>;
+
 export interface TaktExitResult extends TaktLastExit {
   code: number;
   signal: number | undefined;
@@ -28,6 +31,8 @@ export interface TaktRunControllerOptions {
   rows?: number;
   onScreenChange?: () => void;
   onExit?: (result: TaktExitResult) => void;
+  interrupt?: InterruptPty;
+  forceKill?: ForceKillPty;
 }
 
 /**
@@ -95,10 +100,14 @@ export class TaktRunController {
   private lastPid: number | undefined;
   private sessionStatus: TaktSessionStatus = "unknown";
   private readonly options: TaktRunControllerOptions;
+  private readonly interrupt: InterruptPty;
+  private readonly forceKill: ForceKillPty;
   private readonly screenListeners = new Set<() => void>();
 
   constructor(options: TaktRunControllerOptions) {
     this.options = options;
+    this.interrupt = options.interrupt !== undefined ? options.interrupt : interruptPty;
+    this.forceKill = options.forceKill !== undefined ? options.forceKill : forceKillPty;
   }
 
   get isRunning(): boolean {
@@ -144,7 +153,7 @@ export class TaktRunController {
   async start(args = this.options.args ?? ["run"]): Promise<void> {
     this.reconcile();
     if (this.isRunning) {
-      return;
+      throw new Error("TAKT process is already running; stop it before starting a fresh process");
     }
     if (this.hasSession) {
       throw new Error("TAKT session must be disposed before starting a fresh process");
@@ -257,17 +266,17 @@ export class TaktRunController {
   }
 
   async stop(): Promise<void> {
+    this.reconcile();
     const pty = this.pty;
     const exitPromise = this.exitPromise;
     if (!pty || !exitPromise) {
-      this.reconcile();
       return;
     }
 
     try {
       // Writing Ctrl-C follows the same path as pressing Ctrl-C in the
       // terminal and works for both Windows winpty and Unix PTYs.
-      pty.write("\u0003");
+      this.interrupt(pty);
     } catch {
       // Fall through to the process-tree fallback below.
     }
@@ -279,11 +288,7 @@ export class TaktRunController {
     let forceKillError: unknown;
     if (this.pty === pty) {
       try {
-        if (process.platform === "win32") {
-          await killWindowsProcessTree(pty.pid);
-        } else {
-          pty.kill("SIGKILL");
-        }
+        await this.forceKill(pty);
       } catch (error) {
         forceKillError = error;
       }
@@ -324,6 +329,18 @@ export class TaktRunController {
   }
 }
 
+function interruptPty(pty: IPty): void {
+  pty.write("\u0003");
+}
+
+async function forceKillPty(pty: IPty): Promise<void> {
+  if (process.platform === "win32") {
+    await killWindowsProcessTree(pty.pid);
+    return;
+  }
+  pty.kill("SIGKILL");
+}
+
 function createPtyCommand(command: string, args: string[]): { file: string; args: string[] } {
   if (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command)) {
     const commandLine = [command, ...args].map(quoteWindowsArg).join(" ");
@@ -343,10 +360,22 @@ function quoteWindowsArg(value: string): string {
 }
 
 async function settles<T>(promise: Promise<T>, timeoutMs: number): Promise<boolean> {
-  return Promise.race([
-    promise.then(() => true),
-    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-  ]);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (result: boolean): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    void promise.then(
+      () => finish(true),
+      () => finish(false),
+    );
+  });
 }
 
 function disposePty(pty: IPty): void {

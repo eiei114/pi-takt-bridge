@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import register from "../extensions/index.ts";
 
 function loadTools() {
@@ -27,6 +31,26 @@ test("fresh Pi runtime publishes all TAKT control tools and replace schema", () 
     "takt_stop",
   ]);
   assert.equal(tools.get("takt_exec_prompt").parameters.properties.replace.type, "boolean");
+});
+
+test("fresh Pi loader exposes the executable tool schema", async () => {
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-takt-bridge-pi-runtime-"));
+  const loaded = await discoverAndLoadExtensions(["./extensions/index.ts"], process.cwd(), agentDir);
+
+  assert.deepEqual(loaded.errors, []);
+  assert.equal(loaded.extensions.length, 1);
+  const tools = loaded.extensions[0].tools;
+  assert.deepEqual([...tools.keys()].sort(), [
+    "takt_exec_prompt",
+    "takt_read_screen",
+    "takt_send_input",
+    "takt_set_mode",
+    "takt_stop",
+  ]);
+  const execTool = tools.get("takt_exec_prompt").definition;
+  assert.equal(execTool.parameters.type, "object");
+  assert.equal(execTool.parameters.properties.replace.type, "boolean");
+  assert.ok(execTool.parameters.required.includes("prompt"));
 });
 
 test("a second fresh extension registration publishes the same tool contract", () => {

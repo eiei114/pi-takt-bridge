@@ -12,6 +12,8 @@ import { join } from "node:path";
 import test from "node:test";
 import register from "../extensions/index.ts";
 
+const DEAD_OWNER_PID = "999999999";
+
 function createContext(cwd) {
   const notifications = [];
   return {
@@ -76,7 +78,8 @@ function createTaktCommand(directory) {
     "const [operation, preset] = process.argv.slice(2);",
     "const event = (value) => appendFileSync(logPath, `${value}\\n`);",
     "if (operation === \"list\") {",
-    "  const tasks = process.env.TEST_TASK_MODE === \"external\"",
+    "  const taskMode = process.env.TEST_TASK_MODE;",
+    "  const tasks = taskMode === \"external\" || taskMode === \"stale\"",
     "    ? [{ kind: \"running\", ownerPid: Number(process.env.TEST_OWNER_PID), stage: \"external-stage\" }]",
     "    : [];",
     "  process.stdout.write(JSON.stringify({ tasks }) + \"\\n\");",
@@ -84,6 +87,7 @@ function createTaktCommand(directory) {
     "}",
     "if (operation === \"clear\") {",
     "  event(\"clear\");",
+    "  if (process.env.TEST_CLEAR_MODE === \"fail\") process.exit(7);",
     "  process.exit(0);",
     "}",
     "if (operation !== \"exec\") process.exit(2);",
@@ -121,13 +125,14 @@ function configureEnvironment(root, command, logPath, taskMode) {
     ["TEST_TAKT_LOG", process.env.TEST_TAKT_LOG],
     ["TEST_TASK_MODE", process.env.TEST_TASK_MODE],
     ["TEST_OWNER_PID", process.env.TEST_OWNER_PID],
+    ["TEST_CLEAR_MODE", process.env.TEST_CLEAR_MODE],
   ]);
   process.env.APPDATA = root;
   process.env.XDG_CONFIG_HOME = root;
   process.env.TAKT_COMMAND = command;
   process.env.TEST_TAKT_LOG = logPath;
   process.env.TEST_TASK_MODE = taskMode;
-  process.env.TEST_OWNER_PID = String(process.pid);
+  process.env.TEST_OWNER_PID = taskMode === "stale" ? DEAD_OWNER_PID : String(process.pid);
   return () => {
     for (const [name, value] of previous) {
       if (value === undefined) {
@@ -173,7 +178,6 @@ test("extension replaces owned exec and starts again after natural exit", async 
     const first = await invoke(tools, "takt_exec_prompt", {
       profile: "pi-docs",
       prompt: "first body",
-      clear: false,
       preset: "first",
     }, context);
     assert.equal(first.details.replaced, false);
@@ -182,6 +186,7 @@ test("extension replaces owned exec and starts again after natural exit", async 
       profile: "pi-docs",
       prompt: "second body",
       clear: false,
+      replace: true,
       preset: "second",
     }, context);
     assert.equal(second.details.replaced, true);
@@ -197,14 +202,82 @@ test("extension replaces owned exec and starts again after natural exit", async 
     const third = await invoke(tools, "takt_exec_prompt", {
       profile: "pi-docs",
       prompt: "third body",
-      clear: false,
       preset: "third",
     }, context);
     assert.equal(third.details.replaced, false);
 
     const lines = logLines(logPath);
-    assert.ok(lines.indexOf("exit:first:130") < lines.indexOf("exec:second"));
-    assert.ok(lines.indexOf("exit:second:0") < lines.indexOf("exec:third"));
+    const firstClear = lines.indexOf("clear");
+    const firstExec = lines.indexOf("exec:first");
+    const firstExit = lines.indexOf("exit:first:130");
+    const secondClear = lines.indexOf("clear", firstExit + 1);
+    const secondExec = lines.indexOf("exec:second");
+    const secondExit = lines.indexOf("exit:second:0");
+    const thirdClear = lines.indexOf("clear", secondExit + 1);
+    const thirdExec = lines.indexOf("exec:third");
+    assert.ok(firstClear >= 0 && firstClear < firstExec);
+    assert.ok(firstExec < firstExit && firstExit < secondClear && secondClear < secondExec);
+    assert.ok(secondExec < secondExit && secondExit < thirdClear && thirdClear < thirdExec);
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
+test("extension cleans up a failed clear before reporting the error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-clear-failure-"));
+  const project = join(root, "project");
+  mkdirSync(project);
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  writeProfile(root, project);
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "none");
+  process.env.TEST_CLEAR_MODE = "fail";
+  const { tools, events } = loadExtension();
+  const context = createContext(project);
+
+  try {
+    await assert.rejects(
+      () => invoke(tools, "takt_exec_prompt", {
+        profile: "pi-docs",
+        prompt: "clear must fail",
+        preset: "never-started",
+      }, context),
+      /takt clear failed in/,
+    );
+    const lines = logLines(logPath);
+    assert.equal(lines.includes("clear"), true);
+    assert.equal(lines.some((line) => line.startsWith("exec:")), false);
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
+test("extension replaces an observed stale session instead of blocking fresh exec", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-stale-"));
+  const project = join(root, "project");
+  mkdirSync(project);
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  writeProfile(root, project);
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "stale");
+  const { tools, events } = loadExtension();
+  const context = createContext(project);
+
+  try {
+    const observed = await invoke(tools, "takt_read_screen", { rows: 4 }, context);
+    assert.equal(observed.details.status, "stale");
+
+    const started = await invoke(tools, "takt_exec_prompt", {
+      profile: "pi-docs",
+      prompt: "replace stale",
+      clear: false,
+      preset: "second",
+    }, context);
+    assert.equal(started.details.replaced, false);
+
+    assert.equal(logLines(logPath).includes("exec:second"), true);
   } finally {
     await events.get("session_shutdown")?.({ reason: "quit" }, context);
     restoreEnvironment();
@@ -227,6 +300,10 @@ test("extension rejects exec when task metadata reports an external live session
     assert.equal(observed.details.status, "live");
     assert.equal(observed.details.stage, "external-stage");
     assert.equal(observed.details.pid, process.pid);
+
+    const stopResult = await invoke(tools, "takt_stop", { profile: "pi-docs" }, context);
+    assert.equal(stopResult.details.stopped, false);
+    assert.equal(stopResult.details.cwd, project);
 
     await assert.rejects(
       () => invoke(tools, "takt_exec_prompt", {

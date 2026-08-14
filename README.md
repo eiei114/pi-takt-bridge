@@ -50,15 +50,17 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:status` | Open the optional diagnostic state overlay |
 
 The bundled `takt-pi-runner` Agent Skill calls the `takt_exec_prompt` tool for
-the common issue-body → `/go` flow. It uses the `pi-docs` profile by default,
-prefers a concise prompt, replaces a running bridge-owned session when needed,
-clears the old session, starts a fresh preset, submits `/go`, and switches to
-`pi-auto`. Raw output stays in the stacked Pi widget; long pastes show a
-truncated preview while `stage` is `pasting` / `sending_go`. Agents can also use
-`takt_stop` and `takt_set_mode` for recovery. `takt_read_screen` reports
+the common issue-body → `/go` flow. Its published schema includes the `replace`
+option; the normal call passes `replace: true`. It uses the `pi-docs` profile by
+default, prefers a concise prompt, replaces a running bridge-owned session when
+needed, clears the old session, starts a fresh preset, submits `/go`, and
+switches to `pi-auto`. Raw output stays in the stacked Pi widget; long pastes
+show a truncated preview while `stage` is `pasting` / `sending_go`. Agents can
+also use `takt_stop` and `takt_set_mode` for recovery. `takt_read_screen` reports
 `live`, `stale`, `completed`, or `unknown` with PID, stage, and last exit when
-available. If the tool or profile is missing, the skill reports the configuration
-error instead of guessing a path.
+available. If a fresh Pi runtime is missing one of these tools or the named
+profile does not resolve to the requested cwd, the skill reports the exact
+reload/package or profile/cwd mismatch instead of guessing a path.
 
 After a session is live, dual input modes let you keep talking to TAKT without
 leaving Pi:
