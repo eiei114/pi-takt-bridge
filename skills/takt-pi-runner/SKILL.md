@@ -38,9 +38,12 @@ above the normal Pi editor.
 ## Recovery
 
 - If `takt_exec_prompt` reports an already-running session, call it again with
-  `replace: true` (the default) or call `takt_stop` first.
-- If the widget looks frozen, read `stage:` from `takt_read_screen` before
-  assuming a hang. `pasting` / `sending_go` intentionally show a prompt preview.
+  `replace: true` (the default) or call `takt_stop` first. Replacement reconciles,
+  stops, waits, disposes, clears, and only then starts a fresh PTY.
+- If the widget looks frozen, read `status:`, `pid:`, `stage:`, and `lastExit:`
+  from `takt_read_screen` before assuming a hang. `pasting` / `sending_go`
+  intentionally show a prompt preview; `live`, `stale`, `completed`, and
+  `unknown` describe lifecycle ownership.
 - Use `takt_set_mode` only when you need an explicit mode change outside the
   automatic post-submit `pi-auto` transition.
 - Never use shell `taskkill`, `takt exec`, or absolute path guessing when the
@@ -56,9 +59,10 @@ above the normal Pi editor.
   starts a fresh `takt exec <preset>`.
 - Do not send the task body and `/go` through separate ad-hoc mechanisms unless
   recovering inside an already-running `pi-auto` session with `takt_send_input`.
-- If `takt_exec_prompt` is missing, the bridge runtime is not initialized, or
-  the profile is missing, stop. Report the exact missing configuration; do not
-  guess a repository path or fall back to Claude/Codex/direct shell execution.
+- If any required bridge tool is missing, its runtime is not initialized after
+  a fresh Pi reload, or the profile is missing, stop. Report the exact missing
+  configuration as a reload/package mismatch; do not guess a repository path or
+  fall back to Claude/Codex/direct shell execution.
 - If the user explicitly requests a different profile, pass that profile name
   and keep the chosen task body unchanged.
 

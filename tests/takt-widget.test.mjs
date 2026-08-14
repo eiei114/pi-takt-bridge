@@ -5,6 +5,7 @@ const { renderTaktDetails, renderTaktWidget } = await import("../lib/takt-widget
 
 const summary = {
   cwd: "C:/workspace",
+  status: "live",
   running: 2,
   pending: 3,
   blocked: 1,
@@ -12,16 +13,16 @@ const summary = {
   completed: 2,
   stale: 0,
   runs: [
-    { slug: "one", task: "Implement ACP bridge", workflow: "default", status: "running", currentStep: "tests" },
-    { slug: "two", task: "Update docs", workflow: "default", status: "running" },
+    { slug: "one", task: "Implement ACP bridge", workflow: "default", status: "running", sessionStatus: "live", currentStep: "tests" },
+    { slug: "two", task: "Update docs", workflow: "default", status: "running", sessionStatus: "live" },
   ],
 };
 
 test("widget renders a compact multi-run summary", () => {
   assert.deepEqual(renderTaktWidget(summary), [
     "TAKT ● 2 running · 3 pending · 1 blocked",
-    "↳ running: Implement ACP bridge · tests",
-    "↳ running: Update docs",
+    "↳ live: Implement ACP bridge · tests",
+    "↳ live: Update docs",
   ]);
 });
 
@@ -47,8 +48,9 @@ test("widget reports failures without embedding controls", () => {
     blocked: 0,
     failed: 1,
     stale: 1,
+    status: "stale",
     lastError: "provider unavailable",
-    runs: [{ slug: "bad", task: "Retry me", workflow: "default", status: "stale" }],
+    runs: [{ slug: "bad", task: "Retry me", workflow: "default", status: "stale", sessionStatus: "stale" }],
   };
   const lines = renderTaktWidget(failed);
   assert.equal(lines[0], "TAKT ⚠ 0 running · 0 pending · 0 blocked");

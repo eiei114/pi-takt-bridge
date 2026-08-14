@@ -1,4 +1,4 @@
-import type { TaktRunSnapshot, TaktSummary } from "./takt-types.ts";
+import { formatTaktLastExit, type TaktRunSnapshot, type TaktSummary } from "./takt-types.ts";
 
 const DEFAULT_WIDTH = 96;
 
@@ -34,13 +34,24 @@ export function renderTaktDetails(summary: TaktSummary): string[] {
     `completed: ${summary.completed}`,
   ];
 
+  lines.push(`session: ${summary.status}`);
+  if (summary.pid !== undefined) {
+    lines.push(`pid: ${summary.pid}`);
+  }
+  if (summary.stage) {
+    lines.push(`stage: ${summary.stage}`);
+  }
+  if (summary.lastExit) {
+    lines.push(`last exit: ${formatTaktLastExit(summary.lastExit)}`);
+  }
+
   if (summary.runs.length === 0) {
     lines.push("runs: none");
   } else {
     lines.push("runs:");
     for (const run of summary.runs.slice(0, 8)) {
       const step = run.currentStep ? ` · step ${run.currentStep}` : "";
-      lines.push(`- ${run.status}: ${run.task}${step}`);
+      lines.push(`- ${run.sessionStatus}: ${run.task}${step}`);
     }
   }
   if (summary.lastError) {
@@ -51,7 +62,7 @@ export function renderTaktDetails(summary: TaktSummary): string[] {
 
 function renderRunLine(run: TaktRunSnapshot, width: number): string {
   const step = run.currentStep ? ` · ${run.currentStep}` : "";
-  const prefix = `↳ ${run.status}: `;
+  const prefix = `↳ ${run.sessionStatus}: `;
   return prefix + truncate(`${run.task}${step}`, Math.max(24, width - prefix.length));
 }
 

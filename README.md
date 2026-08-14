@@ -55,8 +55,10 @@ prefers a concise prompt, replaces a running bridge-owned session when needed,
 clears the old session, starts a fresh preset, submits `/go`, and switches to
 `pi-auto`. Raw output stays in the stacked Pi widget; long pastes show a
 truncated preview while `stage` is `pasting` / `sending_go`. Agents can also use
-`takt_stop` and `takt_set_mode` for recovery. If the tool or profile is missing,
-the skill reports the configuration error instead of guessing a path.
+`takt_stop` and `takt_set_mode` for recovery. `takt_read_screen` reports
+`live`, `stale`, `completed`, or `unknown` with PID, stage, and last exit when
+available. If the tool or profile is missing, the skill reports the configuration
+error instead of guessing a path.
 
 After a session is live, dual input modes let you keep talking to TAKT without
 leaving Pi:
@@ -72,6 +74,8 @@ screens are stacked above the normal Pi editor, with the most active project
 first. Bridge-owned PTYs show raw TAKT output. A TAKT process started in another
 terminal can be detected from its `.takt` state, but its original PTY cannot be
 attached safely; that project is shown as an external status card instead.
+The bridge only stops PTYs it created, and bounded stop failures are reported
+instead of retried indefinitely.
 
 Default mode keeps Pi focused. Use `/takt:mode` or `Ctrl+Alt+T` when you want
 direct TAKT focus or Pi-auto follow-ups.

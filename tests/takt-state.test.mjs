@@ -1,10 +1,20 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const { classifyRunStatus, parseRunMeta, readRunSnapshots, resolveCommand, usesWindowsShell } = await import("../lib/takt-state.ts");
+const {
+  classifyRunStatus,
+  classifySessionStatus,
+  deriveSummarySessionStatus,
+  parseRunMeta,
+  readRunSnapshots,
+  readTaktSummary,
+  resolveCommand,
+  snapshotRun,
+  usesWindowsShell,
+} = await import("../lib/takt-state.ts");
 
 const validMeta = {
   task: "Add the bridge",
@@ -34,6 +44,36 @@ test("classifyRunStatus marks a running record stale only with a dead owner pid"
   assert.equal(classifyRunStatus({ status: "running" }, 0), "stale");
 });
 
+test("classifySessionStatus distinguishes live, stale, completed, and unknown", () => {
+  assert.equal(classifySessionStatus({ status: "running", pid: process.pid }), "live");
+  assert.equal(classifySessionStatus({ status: "running", pid: 0 }), "stale");
+  assert.equal(classifySessionStatus({ status: "running" }), "unknown");
+  assert.equal(classifySessionStatus({ status: "completed" }), "completed");
+});
+
+test("summary lifecycle status preserves all four observable states", () => {
+  assert.equal(deriveSummarySessionStatus([{ sessionStatus: "live" }]), "live");
+  assert.equal(deriveSummarySessionStatus([{ sessionStatus: "stale" }]), "stale");
+  assert.equal(deriveSummarySessionStatus([{ sessionStatus: "completed" }]), "completed");
+  assert.equal(deriveSummarySessionStatus([{ sessionStatus: "unknown" }]), "unknown");
+});
+
+test("snapshotRun exposes pid, stage, and last exit alongside lifecycle status", () => {
+  const meta = parseRunMeta({
+    ...validMeta,
+    pid: 0,
+    stage: "running",
+    lastExit: { code: 17, signal: 2 },
+    status: "completed",
+  });
+
+  assert.equal(meta?.stage, "running");
+  const snapshot = snapshotRun(meta);
+  assert.equal(snapshot.sessionStatus, "completed");
+  assert.equal(snapshot.stage, "running");
+  assert.deepEqual(snapshot.lastExit, { code: 17, signal: 2 });
+});
+
 test("readRunSnapshots ignores partial metadata and preserves active-first ordering", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-state-"));
   const runs = join(cwd, ".takt", "runs");
@@ -50,6 +90,48 @@ test("readRunSnapshots ignores partial metadata and preserves active-first order
   const snapshots = readRunSnapshots(cwd);
   assert.deepEqual(snapshots.map((run) => run.slug), ["active", "done"]);
   assert.equal(snapshots[0].status, "running");
+});
+
+function createTaskListCommand(directory, output, exitCode = 0) {
+  if (process.platform === "win32") {
+    const command = join(directory, `task-list-${exitCode}.cmd`);
+    writeFileSync(command, `@echo off\r\n@echo ${output}\r\n@exit /b ${exitCode}\r\n`, "utf8");
+    return command;
+  }
+  const command = join(directory, `task-list-${exitCode}.sh`);
+  writeFileSync(command, `#!/bin/sh\nprintf '%s\\n' '${output}'\nexit ${exitCode}\n`, "utf8");
+  chmodSync(command, 0o755);
+  return command;
+}
+
+test("readTaktSummary uses TAKT_COMMAND and preserves live task metadata", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-command-"));
+  const command = createTaskListCommand(cwd, JSON.stringify({
+    tasks: [{ kind: "running", ownerPid: process.pid, stage: "external-stage" }],
+  }));
+  const previousCommand = process.env.TAKT_COMMAND;
+  process.env.TAKT_COMMAND = command;
+  try {
+    const summary = await readTaktSummary(cwd);
+    assert.equal(summary.status, "live");
+    assert.equal(summary.pid, process.pid);
+    assert.equal(summary.stage, "external-stage");
+  } finally {
+    if (previousCommand === undefined) {
+      delete process.env.TAKT_COMMAND;
+    } else {
+      process.env.TAKT_COMMAND = previousCommand;
+    }
+  }
+});
+
+test("readTaktSummary surfaces task-list command failures", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-command-error-"));
+  const command = createTaskListCommand(cwd, "unavailable", 7);
+  await assert.rejects(
+    () => readTaktSummary(cwd, { command }),
+    /TAKT task list failed \(exit 7\)/,
+  );
 });
 
 test("resolveCommand uses npm shims on Windows without changing explicit paths", () => {

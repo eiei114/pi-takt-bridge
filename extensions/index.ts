@@ -41,7 +41,7 @@ import {
   terminalEndsWithText,
 } from "../lib/takt-run-controller.ts";
 import { readTaktSummary } from "../lib/takt-state.ts";
-import type { TaktSummary } from "../lib/takt-types.ts";
+import { formatTaktLastExit, type TaktLastExit, type TaktSessionStatus, type TaktSummary } from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
 
 const WIDGET_KEY = "pi-takt-bridge-projects";
@@ -49,6 +49,7 @@ const STATUS_KEY = "pi-takt-bridge-input-mode";
 const REFRESH_INTERVAL_MS = 2_000;
 const TAKT_INPUT_PROMPT_TIMEOUT_MS = 15_000;
 const TAKT_POST_PASTE_SETTLE_MS = 200;
+const TAKT_LIFECYCLE_TIMEOUT_MS = 10_000;
 const TAKT_AUTO_SCREEN_ROWS = 24;
 
 const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
@@ -85,12 +86,18 @@ const TAKT_READ_SCREEN_PARAMETERS = Type.Object({
   })),
 });
 
-async function showStatus(ctx: ExtensionContext, cwd = ctx.cwd): Promise<void> {
+type TaktBridgeStatus = Pick<TaktSummary, "status"> & Partial<Pick<TaktSummary, "pid" | "stage" | "lastExit">>;
+
+async function showStatus(
+  ctx: ExtensionContext,
+  cwd = ctx.cwd,
+  bridgeStatus?: TaktBridgeStatus,
+): Promise<void> {
   if (!ctx.hasUI) {
     return;
   }
 
-  const summary = await readTaktSummary(cwd);
+  const summary = { ...await readTaktSummary(cwd), ...bridgeStatus };
   const lines = renderTaktDetails(summary);
   await ctx.ui.custom<void>(
     (_tui, theme, _keybindings, done) => {
@@ -137,6 +144,8 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   private liveWidgetVisible = false;
   private inputMode: TaktInputMode = "pi";
   private terminalInputUnsubscribe: (() => void) | undefined;
+  private initialized = false;
+  private initializePromise: Promise<void> | undefined;
 
   constructor(cwd: string) {
     this.ensureProject(cwd);
@@ -158,6 +167,20 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     return this.inputMode;
   }
 
+  getProjectStatus(cwd: string): TaktBridgeStatus | undefined {
+    const project = this.projects.get(projectPathKey(cwd));
+    if (!project) {
+      return undefined;
+    }
+    const snapshot = projectSessionSnapshot(project);
+    return {
+      status: snapshot.status,
+      ...(snapshot.pid !== undefined ? { pid: snapshot.pid } : {}),
+      ...(snapshot.stage ? { stage: snapshot.stage } : {}),
+      ...(snapshot.lastExit ? { lastExit: snapshot.lastExit } : {}),
+    };
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -168,6 +191,22 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   async initialize(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+    if (this.initializePromise) {
+      return this.initializePromise;
+    }
+
+    this.initializePromise = this.initializeOnce();
+    try {
+      await this.initializePromise;
+    } finally {
+      this.initializePromise = undefined;
+    }
+  }
+
+  private async initializeOnce(): Promise<void> {
     const context = this.context;
     if (!context?.hasUI) {
       return;
@@ -190,9 +229,12 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
     await this.refreshProjects();
     this.refreshTimer = setInterval(() => {
-      void this.refreshProjects();
+      void this.refreshProjects().catch((error) => {
+        this.context?.ui.notify(`TAKT status refresh failed: ${errorMessage(error)}`, "warning");
+      });
     }, REFRESH_INTERVAL_MS);
     this.refreshTimer.unref?.();
+    this.initialized = true;
   }
 
   async enqueueTask(task: string, args = ""): Promise<void> {
@@ -239,9 +281,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       await this.showLive();
       return;
     }
-    if (!project.runner.hasSession && project.summary?.running) {
+    if (blocksNewExecution(project.summary)) {
       await this.showLive();
-      context.ui.notify(`TAKT is already running externally in ${project.label}; Pi will not start a duplicate.`, "warning");
+      context.ui.notify(externalSessionError(project).message, "warning");
       return;
     }
 
@@ -254,6 +296,10 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
 
     try {
+      project.runner.reconcile();
+      if (project.runner.hasSession) {
+        await project.runner.dispose();
+      }
       await project.runner.start();
       await this.showLive();
     } catch (error) {
@@ -272,9 +318,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     if (!project) {
       return;
     }
-    if (!project.runner.hasSession && project.summary?.running) {
+    if (blocksNewExecution(project.summary)) {
       await this.showLive();
-      context.ui.notify(`TAKT is already running externally in ${project.label}; Pi will not start a duplicate.`, "warning");
+      context.ui.notify(externalSessionError(project).message, "warning");
       return;
     }
     const preset = profile?.preset ?? await context.ui.input("TAKT exec preset", "Optional preset, e.g. pi-docs");
@@ -290,6 +336,12 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
 
     try {
+      project.runner.reconcile();
+      if (project.runner.hasSession) {
+        await project.runner.stop();
+        await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
+        await project.runner.dispose();
+      }
       await project.runner.start(preset.trim() ? ["exec", preset.trim()] : ["exec"]);
       await this.showLive();
       context.ui.notify(`TAKT exec started for ${project.label}. Use /takt:send to paste input.`, "info");
@@ -308,7 +360,8 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     if (!project) {
       return;
     }
-    if (project.runner.isRunning || project.summary?.running) {
+    project.runner.reconcile();
+    if (project.runner.isRunning || blocksNewExecution(project.summary)) {
       context.ui.notify(`TAKT is running in ${project.label}; stop it before clearing.`, "warning");
       return;
     }
@@ -321,11 +374,18 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
 
     try {
+      if (project.runner.hasSession) {
+        await project.runner.dispose();
+      }
       await project.runner.start(["clear"]);
-      const result = await project.runner.waitForExit();
+      const result = await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
+      if (!result) {
+        throw new Error(`takt clear did not report an exit in ${project.label}`);
+      }
+      await project.runner.dispose();
       context.ui.notify(
-        `TAKT clear ${result?.code === 0 ? "finished" : "failed"} for ${project.label}.`,
-        result?.code === 0 ? "info" : "error",
+        `TAKT clear ${result.code === 0 ? "finished" : "failed"} for ${project.label}.`,
+        result.code === 0 ? "info" : "error",
       );
     } catch (error) {
       context.ui.notify(`TAKT clear failed for ${project.label}: ${errorMessage(error)}`, "error");
@@ -341,9 +401,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     const project = await this.selectProject(
       args,
       "Send input to TAKT",
-      (candidate) => candidate.runner.hasSession,
+      (candidate) => candidate.runner.isRunning,
     );
-    if (!project?.runner.hasSession) {
+    if (!project?.runner.isRunning) {
       return;
     }
     const text = await context.ui.editor(`Input for ${project.label}`, "");
@@ -410,15 +470,19 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     mode: TaktInputMode;
     project?: string;
     cwd?: string;
+    status: TaktSessionStatus;
+    pid?: number;
     running: boolean;
-    stage?: TaktExecStage;
+    stage: string;
+    lastExit?: TaktLastExit;
     lines: string[];
   } {
-    const project = this.activeRunningProject() ?? this.activeSessionProject();
+    const project = this.activeRunningProject() ?? this.activeSessionProject() ?? this.activeObservedProject();
     if (!project) {
-      return { mode: this.inputMode, running: false, lines: [] };
+      return { mode: this.inputMode, status: "unknown", running: false, stage: "idle", lines: [] };
     }
     const maxRows = Math.max(1, Math.min(80, Math.floor(rows || TAKT_AUTO_SCREEN_ROWS)));
+    const snapshot = projectSessionSnapshot(project);
     const lines = shouldUsePromptOverlay(project)
       ? [
           `stage: ${formatTaktExecStage(project.stage)}`,
@@ -427,13 +491,18 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         ]
       : project.runner.terminal
         ? visibleWidgetLines(renderTaktTerminal(project.runner.terminal), maxRows)
-        : [];
+        : project.summary
+          ? renderSummaryScreen(project.summary)
+          : [];
     return {
       mode: this.inputMode,
       project: project.label,
       cwd: project.cwd,
+      status: snapshot.status,
+      ...(snapshot.pid !== undefined ? { pid: snapshot.pid } : {}),
       running: project.runner.isRunning,
-      stage: project.stage,
+      stage: snapshot.stage ?? "idle",
+      ...(snapshot.lastExit ? { lastExit: snapshot.lastExit } : {}),
       lines,
     };
   }
@@ -505,29 +574,49 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     await this.refreshProject(project);
     const replace = options.replace !== false;
     let replaced = false;
+    let preserveExistingSession = false;
 
     try {
-      if (project.runner.isRunning) {
-        if (!replace) {
-          throw new Error(`TAKT is already running in ${project.label}; stop it before starting another exec.`);
-        }
-        this.setProjectStage(project, "stopping", onUpdate, `Stopping running TAKT in ${project.label} for replace…`);
-        await project.runner.stop();
-        await waitUntilNotRunning(project.runner, signal);
-        replaced = true;
-        this.setProjectStage(project, "stopped", onUpdate, `Stopped TAKT in ${project.label}.`);
+      project.runner.reconcile();
+      if (!project.runner.isRunning && blocksNewExecution(project.summary)) {
+        throw externalSessionError(project);
       }
-      if (project.summary?.running) {
-        throw new Error(`TAKT is already running externally in ${project.label}; Pi will not start a duplicate.`);
+      if (project.runner.isRunning && !replace) {
+        preserveExistingSession = true;
+        throw new Error(`TAKT is already running in ${project.label}; stop it before starting another exec.`);
+      }
+
+      if (replace || project.runner.hasSession) {
+        const wasRunning = project.runner.isRunning;
+        if (wasRunning) {
+          this.setProjectStage(project, "stopping", onUpdate, `Stopping running TAKT in ${project.label} for replace…`);
+        }
+        await project.runner.stop();
+        await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
+        await waitUntilNotRunning(project.runner, signal, TAKT_LIFECYCLE_TIMEOUT_MS);
+        await project.runner.dispose();
+        replaced = wasRunning;
+        if (wasRunning) {
+          this.setProjectStage(project, "stopped", onUpdate, `Stopped TAKT in ${project.label}.`);
+        }
+      }
+
+      await this.refreshProject(project);
+      if (blocksNewExecution(project.summary)) {
+        throw externalSessionError(project);
       }
 
       if (options.clear !== false) {
         this.setProjectStage(project, "clearing", onUpdate, `Clearing previous TAKT session in ${project.label}…`);
         await project.runner.start(["clear"]);
-        const clearResult = await project.runner.waitForExit();
-        if (clearResult?.code !== 0) {
-          throw new Error(`takt clear failed in ${project.label} (exit ${clearResult?.code ?? "unknown"})`);
+        const clearResult = await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
+        if (!clearResult) {
+          throw new Error(`takt clear did not report an exit in ${project.label}`);
         }
+        if (clearResult.code !== 0) {
+          throw new Error(`takt clear failed in ${project.label} (exit ${clearResult.code})`);
+        }
+        await project.runner.dispose();
         throwIfAborted(signal);
       }
 
@@ -567,18 +656,34 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       this.notifyProjects();
       return { profile: profile.name, cwd: project.cwd, preset, sentGo: shouldSendGo, replaced };
     } catch (error) {
-      const aborted = Boolean(signal?.aborted);
-      if (project.runner.isRunning) {
-        this.setProjectStage(
-          project,
-          "stopping",
-          onUpdate,
-          `Stopping TAKT in ${project.label} after ${aborted ? "cancel" : "prompt submission failure"}…`,
-        );
-        await project.runner.stop();
-        await waitUntilNotRunning(project.runner);
+      if (preserveExistingSession) {
+        throw error;
       }
-      this.setProjectStage(project, aborted ? "stopped" : "failed");
+
+      const aborted = Boolean(signal?.aborted);
+      const needsCleanup = project.runner.isRunning || project.runner.hasSession;
+      try {
+        if (project.runner.isRunning) {
+          this.setProjectStage(
+            project,
+            "stopping",
+            onUpdate,
+            `Stopping TAKT in ${project.label} after ${aborted ? "cancel" : "prompt submission failure"}…`,
+          );
+        }
+        await project.runner.stop();
+        await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
+        await waitUntilNotRunning(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
+        if (project.runner.hasSession) {
+          await project.runner.dispose();
+        }
+      } catch (cleanupError) {
+        this.setProjectStage(project, "failed");
+        throw new Error(`${errorMessage(error)}; TAKT cleanup failed: ${errorMessage(cleanupError)}`);
+      }
+      if (needsCleanup) {
+        this.setProjectStage(project, aborted ? "stopped" : "failed");
+      }
       throw error;
     }
   }
@@ -595,6 +700,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     const project = args.trim()
       ? this.ensureProject(this.resolveTargetPath(args, context.cwd))
       : this.activeRunningProject();
+    project?.runner.reconcile();
     if (!project?.runner.isRunning) {
       return { project: project?.label, cwd: project?.cwd, stopped: false };
     }
@@ -610,8 +716,14 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
 
     this.setProjectStage(project, "stopping");
-    await project.runner.stop();
-    await waitUntilNotRunning(project.runner);
+    try {
+      await project.runner.stop();
+      await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
+      await waitUntilNotRunning(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
+    } catch (error) {
+      this.setProjectStage(project, "failed");
+      throw new Error(`TAKT stop failed for ${project.label}: ${errorMessage(error)}`);
+    }
     this.setProjectStage(project, "stopped");
     if (this.inputMode !== "pi") {
       await this.setInputMode("pi", { quiet: true });
@@ -833,12 +945,8 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     message?: string,
   ): void {
     project.stage = stage;
-    if (stage === "idle" || stage === "stopped" || stage === "failed" || stage === "running") {
-      // Keep the last prompt preview available through running so the widget
-      // can still summarize if needed; clear once fully idle/stopped/failed.
-      if (stage !== "running") {
-        project.promptPreview = undefined;
-      }
+    if (stage !== "running" && stage !== "pasting" && stage !== "sending_go") {
+      project.promptPreview = undefined;
     }
     if (message) {
       onUpdate?.(message);
@@ -855,12 +963,18 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     this.inputMode = "pi";
     this.context?.ui.setStatus(STATUS_KEY, undefined);
     this.clearLiveWidget();
-    await Promise.all([...this.projects.values()].map(async (project) => {
-      await project.acp.close();
-      await project.runner.dispose();
-    }));
+    const results = await Promise.allSettled(
+      [...this.projects.values()].map((project) => shutdownManagedProject(project)),
+    );
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [errorMessage(result.reason)] : [],
+    );
+    if (failures.length > 0) {
+      throw new Error(`TAKT runtime shutdown incomplete: ${failures.join("; ")}`);
+    }
     this.projects.clear();
     this.profiles.clear();
+    this.initialized = false;
     this.context = undefined;
   }
 
@@ -896,7 +1010,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
           return;
         }
         if (project.stage !== "stopping" && project.stage !== "failed" && project.stage !== "stopped") {
-          project.stage = code === 0 ? "stopped" : "failed";
+          project.stage = code === 0 ? "completed" : "failed";
           project.promptPreview = undefined;
         }
         const outcome = code === 0 ? "finished" : "exited with errors";
@@ -936,6 +1050,13 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   private async refreshProject(project: ManagedProject): Promise<void> {
+    const snapshot = project.runner.reconcile();
+    if (snapshot.status === "completed") {
+      const completedStage = project.stage === "stopping" ? "stopped" : "completed";
+      if (project.stage !== "completed" && project.stage !== "stopped" && project.stage !== "failed") {
+        this.setProjectStage(project, completedStage);
+      }
+    }
     project.summary = await readTaktSummary(project.cwd);
   }
 
@@ -1014,6 +1135,14 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       ?? [...this.projects.values()].find((project) => project.runner.hasSession);
   }
 
+  private activeObservedProject(): ManagedProject | undefined {
+    const current = this.context ? this.projects.get(projectPathKey(this.context.cwd)) : undefined;
+    if (current?.summary) {
+      return current;
+    }
+    return [...this.projects.values()].find((project) => project.summary !== undefined);
+  }
+
   private handleTaktFocusInput(data: string): { consume: boolean } {
     if (matchesKey(data, "escape")) {
       void this.setInputMode("pi");
@@ -1075,6 +1204,80 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 }
 
+function blocksNewExecution(summary: TaktSummary | undefined): boolean {
+  if (!summary) {
+    return false;
+  }
+  if (summary.status === "live") {
+    return true;
+  }
+  if (summary.status === "unknown") {
+    return summary.running > 0;
+  }
+  return false;
+}
+
+function externalSessionError(project: ManagedProject): Error {
+  const status = project.summary?.status;
+  if (!status) {
+    throw new Error(`TAKT summary is unavailable for ${project.label}`);
+  }
+  return new Error(`TAKT has an external ${status} session in ${project.label}; Pi will not start a duplicate.`);
+}
+
+function projectSessionSnapshot(project: ManagedProject): {
+  status: TaktSessionStatus;
+  pid?: number;
+  stage?: string;
+  lastExit?: TaktLastExit;
+} {
+  const runner = project.runner;
+  if (runner.status === "stale") {
+    return {
+      status: "stale",
+      stage: project.stage,
+      ...(runner.pid !== undefined ? { pid: runner.pid } : {}),
+    };
+  }
+  if (runner.isRunning) {
+    return {
+      status: "live",
+      stage: project.stage,
+      ...(runner.pid !== undefined ? { pid: runner.pid } : {}),
+    };
+  }
+  if (runner.lastExit || runner.status === "completed") {
+    return {
+      status: "completed",
+      stage: project.stage,
+      ...(runner.pid !== undefined ? { pid: runner.pid } : {}),
+      ...(runner.lastExit ? { lastExit: runner.lastExit } : {}),
+    };
+  }
+  if (project.summary) {
+    return {
+      status: project.summary.status,
+      ...(project.summary.stage ? { stage: project.summary.stage } : {}),
+      ...(project.summary.pid !== undefined ? { pid: project.summary.pid } : {}),
+      ...(project.summary.lastExit ? { lastExit: project.summary.lastExit } : {}),
+    };
+  }
+  return { status: "unknown", stage: project.stage };
+}
+
+function renderSummaryScreen(summary: TaktSummary): string[] {
+  return [
+    `status: ${summary.status}`,
+    ...(summary.pid !== undefined ? [`pid: ${summary.pid}`] : []),
+    ...(summary.stage ? [`stage: ${summary.stage}`] : []),
+    ...(summary.lastExit ? [`lastExit: ${formatTaktLastExit(summary.lastExit)}`] : []),
+    `running: ${summary.running}`,
+    `pending: ${summary.pending}`,
+    `completed: ${summary.completed}`,
+    `stale: ${summary.stale}`,
+  ];
+}
+
 function hasSummaryActivity(summary: TaktSummary | undefined): boolean {
   return summary !== undefined && (
     summary.running > 0 ||
@@ -1083,6 +1286,23 @@ function hasSummaryActivity(summary: TaktSummary | undefined): boolean {
     summary.failed > 0 ||
     summary.stale > 0
   );
+}
+
+async function shutdownManagedProject(project: ManagedProject): Promise<void> {
+  const failures: unknown[] = [];
+  try {
+    await project.acp.close();
+  } catch (error) {
+    failures.push(error);
+  }
+  try {
+    await project.runner.dispose();
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.map(errorMessage).join("; "));
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -1140,6 +1360,14 @@ async function waitForTaktInputPrompt(
 
 export default function register(pi: ExtensionAPI): void {
   let runtime: TaktBridgeRuntime | undefined;
+  const getRuntime = async (context: ExtensionContext): Promise<TaktBridgeRuntime> => {
+    if (!runtime) {
+      runtime = new TaktBridgeRuntime(context.cwd);
+    }
+    runtime.attach(context);
+    await runtime.initialize();
+    return runtime;
+  };
 
   pi.registerTool({
     name: "takt_exec_prompt",
@@ -1153,11 +1381,8 @@ export default function register(pi: ExtensionAPI): void {
       "If the tool reports a missing profile or extension, stop and report the missing configuration instead of guessing.",
     ],
     parameters: TAKT_EXEC_PROMPT_PARAMETERS,
-    async execute(_toolCallId, params, signal, onUpdate) {
-      const activeRuntime = runtime;
-      if (!activeRuntime) {
-        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
-      }
+    async execute(_toolCallId, params, signal, onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
       const result = await activeRuntime.executePrompt(
         params.profile?.trim() || "pi-docs",
         params.prompt,
@@ -1192,11 +1417,8 @@ export default function register(pi: ExtensionAPI): void {
       "Do not shell out to taskkill or takt stop when this tool is available.",
     ],
     parameters: TAKT_STOP_PARAMETERS,
-    async execute(_toolCallId, params) {
-      const activeRuntime = runtime;
-      if (!activeRuntime) {
-        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
-      }
+    async execute(_toolCallId, params, _signal, _onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
       const result = await activeRuntime.stopActive(params.profile?.trim() || "", { confirm: false });
       return {
         content: [{
@@ -1220,11 +1442,8 @@ export default function register(pi: ExtensionAPI): void {
       "Use takt_set_mode when you need an explicit mode change outside that flow.",
     ],
     parameters: TAKT_SET_MODE_PARAMETERS,
-    async execute(_toolCallId, params) {
-      const activeRuntime = runtime;
-      if (!activeRuntime) {
-        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
-      }
+    async execute(_toolCallId, params, _signal, _onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
       const mode = await activeRuntime.cycleOrSetInputMode(params.mode);
       return {
         content: [{ type: "text", text: `TAKT input mode: ${mode}` }],
@@ -1243,18 +1462,18 @@ export default function register(pi: ExtensionAPI): void {
       "Only the active bridge-owned TAKT PTY is visible; external status cards are not raw screens.",
     ],
     parameters: TAKT_READ_SCREEN_PARAMETERS,
-    async execute(_toolCallId, params) {
-      const activeRuntime = runtime;
-      if (!activeRuntime) {
-        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
-      }
+    async execute(_toolCallId, params, _signal, _onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
       const screen = activeRuntime.readActiveScreen(params.rows);
       const header = [
         `mode: ${screen.mode}`,
         screen.project ? `project: ${screen.project}` : "project: none",
         screen.cwd ? `cwd: ${screen.cwd}` : undefined,
+        `status: ${screen.status}`,
+        screen.pid !== undefined ? `pid: ${screen.pid}` : undefined,
         `running: ${screen.running}`,
-        screen.stage ? `stage: ${screen.stage}` : undefined,
+        `stage: ${screen.stage}`,
+        screen.lastExit ? `lastExit: ${formatTaktLastExit(screen.lastExit)}` : undefined,
       ].filter(Boolean);
       return {
         content: [{
@@ -1278,11 +1497,8 @@ export default function register(pi: ExtensionAPI): void {
       "Do not use this tool to replace takt_exec_prompt for the initial clear → exec → /go flow.",
     ],
     parameters: TAKT_SEND_INPUT_PARAMETERS,
-    async execute(_toolCallId, params) {
-      const activeRuntime = runtime;
-      if (!activeRuntime) {
-        throw new Error("TAKT bridge runtime is not initialized; reload the extension and try again.");
-      }
+    async execute(_toolCallId, params, _signal, _onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
       const result = await activeRuntime.sendAutoInput(params.text, { submit: params.submit });
       return {
         content: [{
@@ -1295,15 +1511,41 @@ export default function register(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, context) => {
-    await runtime?.shutdown();
-    runtime = new TaktBridgeRuntime(context.cwd);
-    runtime.attach(context);
-    await runtime.initialize();
+    const previousRuntime = runtime;
+    if (previousRuntime) {
+      try {
+        await previousRuntime.shutdown();
+      } catch (error) {
+        previousRuntime.attach(context);
+        context.ui.notify(
+          `TAKT previous runtime retained because shutdown is incomplete: ${errorMessage(error)}`,
+          "error",
+        );
+        return;
+      }
+    }
+
+    const nextRuntime = new TaktBridgeRuntime(context.cwd);
+    nextRuntime.attach(context);
+    runtime = nextRuntime;
+    await nextRuntime.initialize();
   });
 
-  pi.on("session_shutdown", async () => {
-    await runtime?.shutdown();
-    runtime = undefined;
+  pi.on("session_shutdown", async (_event, context) => {
+    const activeRuntime = runtime;
+    if (!activeRuntime) {
+      return;
+    }
+    try {
+      await activeRuntime.shutdown();
+      runtime = undefined;
+    } catch (error) {
+      activeRuntime.attach(context);
+      context.ui.notify(
+        `TAKT runtime retained because shutdown is incomplete: ${errorMessage(error)}`,
+        "error",
+      );
+    }
   });
 
   pi.registerCommand("takt", {
@@ -1327,7 +1569,7 @@ export default function register(pi: ExtensionAPI): void {
         const cwd = args.trim()
           ? runtime?.resolveTargetPath(args, context.cwd) ?? normalizeProjectPath(args, context.cwd)
           : context.cwd;
-        await showStatus(context, cwd);
+        await showStatus(context, cwd, runtime?.getProjectStatus(cwd));
       } catch (error) {
         context.ui.notify(`TAKT status path failed: ${errorMessage(error)}`, "error");
       }

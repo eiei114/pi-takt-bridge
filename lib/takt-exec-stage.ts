@@ -8,6 +8,7 @@ export const TAKT_EXEC_STAGES = [
   "running",
   "stopping",
   "stopped",
+  "completed",
   "failed",
 ] as const;
 

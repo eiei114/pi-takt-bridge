@@ -13,7 +13,7 @@ import {
   formatTaktInputModeLine,
   type TaktInputMode,
 } from "./takt-input-mode.ts";
-import type { TaktSummary } from "./takt-types.ts";
+import { formatTaktLastExit, type TaktSummary } from "./takt-types.ts";
 
 const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 30;
@@ -220,11 +220,21 @@ function renderPromptOverlay(project: TaktProjectWidgetEntry): string[] {
 
 function renderObservedProject(summary: TaktSummary): string[] {
   const lines = [
-    `status: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked`,
+    `status: ${summary.status}`,
+    `counts: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked`,
   ];
+  if (summary.pid !== undefined) {
+    lines.push(`pid: ${summary.pid}`);
+  }
+  if (summary.stage) {
+    lines.push(`stage: ${summary.stage}`);
+  }
+  if (summary.lastExit) {
+    lines.push(`lastExit: ${formatTaktLastExit(summary.lastExit)}`);
+  }
   const run = summary.runs[0];
   if (run) {
-    lines.push(`↳ ${run.status}: ${run.task}${run.currentStep ? ` · ${run.currentStep}` : ""}`);
+    lines.push(`↳ ${run.sessionStatus}: ${run.task}${run.currentStep ? ` · ${run.currentStep}` : ""}`);
   }
   lines.push("↳ external TAKT session: raw PTY screen unavailable");
   return lines.slice(0, MAX_PROJECT_ROWS - 1);

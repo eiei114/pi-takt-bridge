@@ -3,8 +3,22 @@ import { spawn as spawnPty, type IPty } from "node-pty";
 import type { Terminal as XtermTerminal } from "@xterm/headless";
 import { killWindowsProcessTree } from "./process-control.ts";
 import { resolveCommand } from "./takt-state.ts";
+import type { TaktLastExit, TaktSessionStatus } from "./takt-types.ts";
 
 const { Terminal } = xterm;
+const STOP_GRACE_MS = 1_500;
+
+export interface TaktExitResult extends TaktLastExit {
+  code: number;
+  signal: number | undefined;
+}
+
+export interface TaktRunControllerSnapshot {
+  status: TaktSessionStatus;
+  pid?: number;
+  lastExit?: TaktExitResult;
+  hasSession: boolean;
+}
 
 export interface TaktRunControllerOptions {
   cwd: string;
@@ -13,7 +27,7 @@ export interface TaktRunControllerOptions {
   cols?: number;
   rows?: number;
   onScreenChange?: () => void;
-  onExit?: (result: { code: number; signal: number | undefined }) => void;
+  onExit?: (result: TaktExitResult) => void;
 }
 
 /**
@@ -75,8 +89,11 @@ export class TaktRunController {
   private pty: IPty | undefined;
   private lastPty: IPty | undefined;
   private terminalInstance: XtermTerminal | undefined;
-  private exitPromise: Promise<{ code: number; signal: number | undefined }> | undefined;
-  private resolveExit: ((result: { code: number; signal: number | undefined }) => void) | undefined;
+  private exitPromise: Promise<TaktExitResult> | undefined;
+  private resolveExit: ((result: TaktExitResult) => void) | undefined;
+  private lastExitResult: TaktExitResult | undefined;
+  private lastPid: number | undefined;
+  private sessionStatus: TaktSessionStatus = "unknown";
   private readonly options: TaktRunControllerOptions;
   private readonly screenListeners = new Set<() => void>();
 
@@ -96,17 +113,43 @@ export class TaktRunController {
     return this.terminalInstance;
   }
 
+  get status(): TaktSessionStatus {
+    return this.sessionStatus;
+  }
+
+  get pid(): number | undefined {
+    return this.pty?.pid ?? this.lastPid;
+  }
+
+  get lastExit(): TaktExitResult | undefined {
+    return this.lastExitResult;
+  }
+
   subscribe(listener: () => void): () => void {
     this.screenListeners.add(listener);
     return () => this.screenListeners.delete(listener);
   }
 
+  reconcile(): TaktRunControllerSnapshot {
+    if (this.pty && this.sessionStatus !== "stale") {
+      this.sessionStatus = "live";
+    } else if (this.lastExitResult) {
+      this.sessionStatus = "completed";
+    } else if (!this.terminalInstance) {
+      this.sessionStatus = "unknown";
+    }
+    return this.snapshot();
+  }
+
   async start(args = this.options.args ?? ["run"]): Promise<void> {
+    this.reconcile();
     if (this.isRunning) {
       return;
     }
+    if (this.hasSession) {
+      throw new Error("TAKT session must be disposed before starting a fresh process");
+    }
 
-    this.terminalInstance?.dispose();
     const cols = this.options.cols ?? 120;
     const rows = this.options.rows ?? 30;
     const terminal = new Terminal({
@@ -116,7 +159,7 @@ export class TaktRunController {
       convertEol: false,
       allowProposedApi: true,
     });
-    const command = resolveCommand(this.options.command ?? process.env.TAKT_COMMAND ?? "takt");
+    const command = resolveCommand(this.options.command);
     const ptyCommand = createPtyCommand(command, args);
 
     let pty: IPty;
@@ -144,6 +187,9 @@ export class TaktRunController {
     this.terminalInstance = terminal;
     this.pty = pty;
     this.lastPty = pty;
+    this.lastPid = pty.pid;
+    this.lastExitResult = undefined;
+    this.sessionStatus = "live";
     this.exitPromise = new Promise((resolve) => {
       this.resolveExit = resolve;
     });
@@ -152,15 +198,21 @@ export class TaktRunController {
       terminal.write(data, () => this.notifyScreenChange());
     });
     pty.onExit(({ exitCode, signal }) => {
-      const result = { code: exitCode, signal };
-      if (this.pty === pty) {
+      const result: TaktExitResult = { code: exitCode, signal };
+      const isCurrent = this.pty === pty;
+      if (isCurrent) {
         this.pty = undefined;
+        this.lastPty = undefined;
+        this.lastExitResult = result;
+        this.sessionStatus = "completed";
+        disposePty(pty);
         this.resolveExit?.(result);
         this.resolveExit = undefined;
         this.notifyScreenChange();
         this.options.onExit?.(result);
-        disposePty(pty);
+        return;
       }
+      disposePty(pty);
     });
   }
 
@@ -171,8 +223,17 @@ export class TaktRunController {
     this.pty.write(data);
   }
 
-  async waitForExit(): Promise<{ code: number; signal: number | undefined } | undefined> {
-    return this.exitPromise;
+  async waitForExit(timeoutMs?: number): Promise<TaktExitResult | undefined> {
+    if (!this.exitPromise) {
+      return this.lastExitResult;
+    }
+    if (timeoutMs === undefined) {
+      return this.exitPromise;
+    }
+    if (await settles(this.exitPromise, timeoutMs)) {
+      return this.exitPromise;
+    }
+    throw new Error(`TAKT process did not exit within ${timeoutMs / 1_000} seconds`);
   }
 
   private notifyScreenChange(): void {
@@ -199,6 +260,7 @@ export class TaktRunController {
     const pty = this.pty;
     const exitPromise = this.exitPromise;
     if (!pty || !exitPromise) {
+      this.reconcile();
       return;
     }
 
@@ -210,32 +272,55 @@ export class TaktRunController {
       // Fall through to the process-tree fallback below.
     }
 
-    if (await settles(exitPromise, 1_500)) {
+    if (await settles(exitPromise, STOP_GRACE_MS)) {
       return;
     }
 
+    let forceKillError: unknown;
     if (this.pty === pty) {
-      if (process.platform === "win32") {
-        await killWindowsProcessTree(pty.pid);
-      } else {
-        try {
+      try {
+        if (process.platform === "win32") {
+          await killWindowsProcessTree(pty.pid);
+        } else {
           pty.kill("SIGKILL");
-        } catch {
-          // Best effort; the exit event reconciles state when possible.
         }
+      } catch (error) {
+        forceKillError = error;
       }
     }
-    await settles(exitPromise, 1_500);
+    if (await settles(exitPromise, STOP_GRACE_MS)) {
+      return;
+    }
+
+    this.sessionStatus = "stale";
+    const detail = forceKillError ? `: ${errorMessage(forceKillError)}` : "";
+    throw new Error(`TAKT process did not stop within ${STOP_GRACE_MS * 2 / 1_000} seconds${detail}`);
   }
 
   async dispose(): Promise<void> {
     await this.stop();
+    if (this.pty) {
+      this.sessionStatus = "stale";
+      throw new Error("TAKT process is still running; refusing to dispose its active PTY");
+    }
     if (this.lastPty) {
       disposePty(this.lastPty);
     }
     this.lastPty = undefined;
     this.terminalInstance?.dispose();
     this.terminalInstance = undefined;
+    this.exitPromise = undefined;
+    this.resolveExit = undefined;
+    this.sessionStatus = this.lastExitResult ? "completed" : "unknown";
+  }
+
+  private snapshot(): TaktRunControllerSnapshot {
+    return {
+      status: this.sessionStatus,
+      ...(this.pid !== undefined ? { pid: this.pid } : {}),
+      ...(this.lastExitResult ? { lastExit: this.lastExitResult } : {}),
+      hasSession: this.hasSession,
+    };
   }
 }
 
@@ -295,4 +380,8 @@ function disposePty(pty: IPty): void {
       // Best effort cleanup; the public PTY lifecycle remains authoritative.
     }
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

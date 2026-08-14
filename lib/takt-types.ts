@@ -12,6 +12,20 @@ export const RUN_STATUSES = [
 export type TaktStatus = (typeof RUN_STATUSES)[number];
 export type PersistedRunStatus = "running" | "completed" | "aborted" | "failed";
 
+export const TAKT_SESSION_STATUSES = ["live", "stale", "completed", "unknown"] as const;
+export type TaktSessionStatus = (typeof TAKT_SESSION_STATUSES)[number];
+
+export interface TaktLastExit {
+  code?: number;
+  signal?: number;
+}
+
+export function formatTaktLastExit(lastExit: TaktLastExit): string {
+  const code = lastExit.code !== undefined ? `code=${lastExit.code}` : "code=unknown";
+  const signal = lastExit.signal !== undefined ? ` signal=${lastExit.signal}` : "";
+  return `${code}${signal}`;
+}
+
 export interface TaktRunMeta {
   task: string;
   workflow: string;
@@ -22,6 +36,10 @@ export interface TaktRunMeta {
   logsDirectory: string;
   status: PersistedRunStatus;
   startTime: string;
+  ownerPid?: number;
+  pid?: number;
+  stage?: string;
+  lastExit?: TaktLastExit;
   reason?: string;
   failure?: {
     step: string;
@@ -40,6 +58,10 @@ export interface TaktRunSnapshot {
   task: string;
   workflow: string;
   status: TaktStatus;
+  sessionStatus: TaktSessionStatus;
+  pid?: number;
+  stage?: string;
+  lastExit?: TaktLastExit;
   startTime?: string;
   updatedAt?: string;
   currentStep?: string;
@@ -55,6 +77,8 @@ export interface TaktTaskItem {
   content?: string;
   summary?: string;
   ownerPid?: number;
+  stage?: string;
+  lastExit?: TaktLastExit;
   failure?: {
     error?: string;
   };
@@ -66,6 +90,10 @@ export interface TaktTaskItem {
 export interface TaktSummary {
   cwd: string;
   runs: TaktRunSnapshot[];
+  status: TaktSessionStatus;
+  pid?: number;
+  stage?: string;
+  lastExit?: TaktLastExit;
   running: number;
   pending: number;
   blocked: number;

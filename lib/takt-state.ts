@@ -1,11 +1,30 @@
-import { execFile as execFileCallback } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
-import type { TaktRunMeta, TaktRunSnapshot, TaktSummary, TaktTaskItem, TaktStatus } from "./takt-types.ts";
+import { spawnCommand } from "./process-control.ts";
+import type {
+  TaktLastExit,
+  TaktRunMeta,
+  TaktRunSnapshot,
+  TaktSessionStatus,
+  TaktSummary,
+  TaktTaskItem,
+  TaktStatus,
+} from "./takt-types.ts";
 
-const execFile = promisify(execFileCallback);
 const MAX_LIST_OUTPUT = 1_000_000;
+const TASK_LIST_ARGS = ["list", "--non-interactive", "--format", "json"] as const;
+const REQUIRED_META_STRING_FIELDS = [
+  "task",
+  "workflow",
+  "runSlug",
+  "runRoot",
+  "reportDirectory",
+  "contextDirectory",
+  "logsDirectory",
+  "startTime",
+] as const;
+const OPTIONAL_META_STRING_FIELDS = ["reason", "endTime", "currentStep", "updatedAt", "stage"] as const;
+const TASK_TEXT_FIELDS = ["name", "content", "summary", "stage"] as const;
 
 export interface TaktStateOptions {
   command?: string;
@@ -13,26 +32,10 @@ export interface TaktStateOptions {
 }
 
 export function parseRunMeta(value: unknown): TaktRunMeta | undefined {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || !isPersistedStatus(value.status)) {
     return undefined;
   }
-
-  const status = value.status;
-  if (!isPersistedStatus(status)) {
-    return undefined;
-  }
-
-  const requiredStrings = [
-    "task",
-    "workflow",
-    "runSlug",
-    "runRoot",
-    "reportDirectory",
-    "contextDirectory",
-    "logsDirectory",
-    "startTime",
-  ];
-  if (requiredStrings.some((key) => typeof value[key] !== "string" || value[key] === "")) {
+  if (REQUIRED_META_STRING_FIELDS.some((key) => !isNonEmptyString(value[key]))) {
     return undefined;
   }
 
@@ -44,14 +47,22 @@ export function parseRunMeta(value: unknown): TaktRunMeta | undefined {
     reportDirectory: value.reportDirectory as string,
     contextDirectory: value.contextDirectory as string,
     logsDirectory: value.logsDirectory as string,
-    status,
+    status: value.status,
     startTime: value.startTime as string,
   };
 
-  for (const key of ["reason", "endTime", "currentStep", "updatedAt"] as const) {
-    if (typeof value[key] === "string") {
-      result[key] = value[key] as string;
+  for (const key of OPTIONAL_META_STRING_FIELDS) {
+    if (isNonEmptyString(value[key])) {
+      result[key] = value[key];
     }
+  }
+  const ownerPid = parsePid(value.ownerPid);
+  if (ownerPid !== undefined) {
+    result.ownerPid = ownerPid;
+  }
+  const pid = parsePid(value.pid);
+  if (pid !== undefined) {
+    result.pid = pid;
   }
   if (isNonNegativeInteger(value.iterations)) {
     result.iterations = value.iterations;
@@ -62,7 +73,11 @@ export function parseRunMeta(value: unknown): TaktRunMeta | undefined {
   if (value.phase === 1 || value.phase === 2 || value.phase === 3) {
     result.phase = value.phase;
   }
-  if (isRecord(value.failure) && typeof value.failure.step === "string" && typeof value.failure.error === "string") {
+  const lastExit = parseLastExit(value.lastExit);
+  if (lastExit) {
+    result.lastExit = lastExit;
+  }
+  if (isRecord(value.failure) && isNonEmptyString(value.failure.step) && isNonEmptyString(value.failure.error)) {
     result.failure = { step: value.failure.step, error: value.failure.error };
   }
 
@@ -82,6 +97,20 @@ export function classifyRunStatus(
   return "running";
 }
 
+export function classifySessionStatus(
+  meta: Pick<TaktRunMeta, "status"> & Partial<Pick<TaktRunMeta, "ownerPid" | "pid">>,
+  ownerPid?: number,
+): TaktSessionStatus {
+  if (meta.status !== "running") {
+    return "completed";
+  }
+  const pid = ownerPid ?? meta.ownerPid ?? meta.pid;
+  if (pid === undefined) {
+    return "unknown";
+  }
+  return isProcessAlive(pid) ? "live" : "stale";
+}
+
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
@@ -95,12 +124,19 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 export function snapshotRun(meta: TaktRunMeta, ownerPid?: number): TaktRunSnapshot {
-  const status = classifyRunStatus(meta, ownerPid);
+  const pid = ownerPid ?? meta.ownerPid ?? meta.pid;
+  const status = classifyRunStatus(meta, pid);
+  const sessionStatus = classifySessionStatus(meta, pid);
+  const stage = meta.stage ?? meta.currentStep;
   return {
     slug: meta.runSlug,
     task: meta.task,
     workflow: meta.workflow,
     status,
+    sessionStatus,
+    ...(pid !== undefined ? { pid } : {}),
+    ...(stage ? { stage } : {}),
+    ...(meta.lastExit ? { lastExit: meta.lastExit } : {}),
     ...(meta.startTime ? { startTime: meta.startTime } : {}),
     ...(meta.updatedAt ? { updatedAt: meta.updatedAt } : {}),
     ...(meta.currentStep ? { currentStep: meta.currentStep } : {}),
@@ -111,7 +147,7 @@ export function snapshotRun(meta: TaktRunMeta, ownerPid?: number): TaktRunSnapsh
   };
 }
 
-export function readRunSnapshots(cwd: string, taskItems: TaktTaskItem[] = []): TaktRunSnapshot[] {
+export function readRunSnapshots(cwd: string, taskItems: readonly TaktTaskItem[] = []): TaktRunSnapshot[] {
   const runsDirectory = resolve(cwd, ".takt", "runs");
   if (!existsSync(runsDirectory)) {
     return [];
@@ -148,10 +184,20 @@ export async function readTaktSummary(cwd: string, options: TaktStateOptions = {
   const queueFailed = taskItems.filter((item) => item.kind === "failed").length;
   const queueCompleted = taskItems.filter((item) => item.kind === "completed").length;
   const failedRun = runs.find((run) => run.status === "failed" || run.status === "stale");
+  const representativeRun = runs[0];
+  const representativeTask = taskItems.find((item) => item.kind === "running");
+  const status = deriveSummarySessionStatus(runs, taskItems);
+  const pid = representativeRun?.pid ?? representativeTask?.ownerPid;
+  const stage = representativeRun?.stage ?? representativeTask?.stage;
+  const lastExit = representativeRun?.lastExit ?? representativeTask?.lastExit;
 
   return {
     cwd,
     runs,
+    status,
+    ...(pid !== undefined ? { pid } : {}),
+    ...(stage ? { stage } : {}),
+    ...(lastExit ? { lastExit } : {}),
     running: Math.max(queueRunning, runs.filter((run) => run.status === "running").length),
     pending,
     blocked: queueBlocked + runs.filter((run) => run.status === "blocked").length,
@@ -162,41 +208,121 @@ export async function readTaktSummary(cwd: string, options: TaktStateOptions = {
   };
 }
 
-export async function readTaskItems(cwd: string, command = "takt"): Promise<TaktTaskItem[]> {
-  try {
-    const { stdout } = await execFile(resolveCommand(command), ["list", "--non-interactive", "--format", "json"], {
-      cwd,
-      windowsHide: true,
-      maxBuffer: MAX_LIST_OUTPUT,
-    });
-    const parsed: unknown = JSON.parse(stdout);
-    if (!isRecord(parsed) || !Array.isArray(parsed.tasks)) {
-      return [];
-    }
-    return parsed.tasks.filter(isTaskItem);
-  } catch {
-    return [];
+export function deriveSummarySessionStatus(
+  runs: readonly Pick<TaktRunSnapshot, "sessionStatus">[],
+  taskItems: readonly TaktTaskItem[] = [],
+): TaktSessionStatus {
+  const statuses = [
+    ...runs.map((run) => run.sessionStatus),
+    ...taskItems.filter((item) => item.kind === "running").map(classifyTaskSessionStatus),
+  ];
+  if (statuses.includes("live")) {
+    return "live";
   }
+  if (statuses.includes("stale")) {
+    return "stale";
+  }
+  if (statuses.includes("unknown")) {
+    return "unknown";
+  }
+  if (statuses.includes("completed")) {
+    return "completed";
+  }
+  return "unknown";
 }
 
-export function resolveCommand(command: string): string {
-  if (process.platform !== "win32" || /[\\/]/.test(command) || /\.(?:cmd|exe|bat)$/i.test(command)) {
-    return command;
+export async function readTaskItems(cwd: string, command?: string): Promise<TaktTaskItem[]> {
+  const resolvedCommand = resolveCommand(command);
+  const stdout = await runTaskList(resolvedCommand, cwd);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch (error) {
+    throw new Error(`TAKT task list returned invalid JSON: ${errorMessage(error)}`);
   }
-  return `${command}.cmd`;
+  if (!isRecord(parsed) || !Array.isArray(parsed.tasks)) {
+    throw new Error("TAKT task list returned an invalid response shape");
+  }
+  return parsed.tasks.map(normalizeTaskItem).filter((item): item is TaktTaskItem => item !== undefined);
+}
+
+function runTaskList(command: string, cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let child: ReturnType<typeof spawnCommand>;
+    try {
+      child = spawnCommand(command, [...TASK_LIST_ARGS], {
+        cwd,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      reject(new Error(`TAKT task list could not start: ${errorMessage(error)}`));
+      return;
+    }
+
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+    const fail = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(error);
+    };
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (Buffer.byteLength(stdout, "utf8") > MAX_LIST_OUTPUT) {
+        fail(new Error(`TAKT task list exceeded the ${MAX_LIST_OUTPUT}-byte output limit`));
+        try {
+          child.kill();
+        } catch {
+          // The owned task-list child is already exiting.
+        }
+      }
+    });
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr = `${stderr}${chunk}`.slice(-500);
+    });
+    child.once("error", (error) => fail(new Error(`TAKT task list could not start: ${errorMessage(error)}`)));
+    child.once("close", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      if (code !== 0 || signal !== null) {
+        const detail = stderr.trim();
+        fail(new Error(
+          `TAKT task list failed (exit ${code ?? signal ?? "unknown"})${detail ? `: ${detail}` : ""}`,
+        ));
+        return;
+      }
+      settled = true;
+      resolve(stdout);
+    });
+  });
+}
+
+export function resolveCommand(command?: string): string {
+  const selectedCommand = command ?? process.env.TAKT_COMMAND ?? "takt";
+  if (process.platform !== "win32" || /[\\/]/.test(selectedCommand) || /\.(?:cmd|exe|bat)$/i.test(selectedCommand)) {
+    return selectedCommand;
+  }
+  return `${selectedCommand}.cmd`;
 }
 
 export function usesWindowsShell(command: string): boolean {
   return process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
 }
 
-function findOwnerPid(meta: TaktRunMeta, taskItems: TaktTaskItem[]): number | undefined {
+function findOwnerPid(meta: TaktRunMeta, taskItems: readonly TaktTaskItem[]): number | undefined {
   const match = taskItems.find((item) =>
     item.kind === "running" &&
     item.ownerPid !== undefined &&
     (item.data?.task === meta.task || item.content === meta.task || item.summary === meta.task),
   );
-  return match?.ownerPid;
+  return match?.ownerPid ?? meta.ownerPid ?? meta.pid;
 }
 
 function compareRuns(left: TaktRunSnapshot, right: TaktRunSnapshot): number {
@@ -208,19 +334,80 @@ function compareRuns(left: TaktRunSnapshot, right: TaktRunSnapshot): number {
   return (right.startTime ?? "").localeCompare(left.startTime ?? "");
 }
 
+function classifyTaskSessionStatus(item: TaktTaskItem): TaktSessionStatus {
+  if (item.ownerPid === undefined) {
+    return "unknown";
+  }
+  return isProcessAlive(item.ownerPid) ? "live" : "stale";
+}
+
+function normalizeTaskItem(value: unknown): TaktTaskItem | undefined {
+  if (!isRecord(value) || !isNonEmptyString(value.kind)) {
+    return undefined;
+  }
+  const item: TaktTaskItem = { kind: value.kind };
+  for (const key of TASK_TEXT_FIELDS) {
+    if (isNonEmptyString(value[key])) {
+      item[key] = value[key];
+    }
+  }
+  const ownerPid = parsePid(value.ownerPid);
+  if (ownerPid !== undefined) {
+    item.ownerPid = ownerPid;
+  }
+  if (isRecord(value.failure) && typeof value.failure.error === "string") {
+    item.failure = { error: value.failure.error };
+  }
+  const lastExit = parseLastExit(value.lastExit);
+  if (lastExit) {
+    item.lastExit = lastExit;
+  }
+  if (isRecord(value.data) && typeof value.data.task === "string") {
+    item.data = { task: value.data.task };
+  }
+  return item;
+}
+
+function parseLastExit(value: unknown): TaktLastExit | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const result: TaktLastExit = {};
+  if (isInteger(value.code)) {
+    result.code = value.code;
+  }
+  if (isInteger(value.signal)) {
+    result.signal = value.signal;
+  }
+  return result.code !== undefined || result.signal !== undefined ? result : undefined;
+}
+
+function parsePid(value: unknown): number | undefined {
+  return isPositiveInteger(value) ? value : undefined;
+}
+
 function isPersistedStatus(value: unknown): value is TaktRunMeta["status"] {
   return value === "running" || value === "completed" || value === "aborted" || value === "failed";
 }
 
 function isNonNegativeInteger(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  return isInteger(value) && value >= 0;
 }
 
-function isTaskItem(value: unknown): value is TaktTaskItem {
-  if (!isRecord(value) || typeof value.kind !== "string") {
-    return false;
-  }
-  return true;
+function isPositiveInteger(value: unknown): value is number {
+  return isInteger(value) && value > 0;
+}
+
+function isInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

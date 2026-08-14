@@ -56,13 +56,14 @@ test("project stack keeps live screens and external project status together", as
   };
   const observedSummary = {
     cwd: "C:/repo-b",
+    status: "live",
     running: 1,
     pending: 0,
     blocked: 0,
     failed: 0,
     completed: 0,
     stale: 0,
-    runs: [{ slug: "run-b", task: "repo-b task", workflow: "default", status: "running" }],
+    runs: [{ slug: "run-b", task: "repo-b task", workflow: "default", status: "running", sessionStatus: "live" }],
   };
 
   const lines = renderTaktProjectStack([
@@ -123,13 +124,14 @@ test("project stack truncates long paths to the Pi widget width", () => {
       cwd: "C:/Users/Keisu/Projects/OSS/takt",
       summary: {
         cwd: "C:/Users/Keisu/Projects/OSS/takt",
+        status: "live",
         running: 1,
         pending: 0,
         blocked: 0,
         failed: 0,
         completed: 0,
         stale: 0,
-        runs: [{ slug: "run", task: "docs", workflow: "default", status: "running" }],
+        runs: [{ slug: "run", task: "docs", workflow: "default", status: "running", sessionStatus: "live" }],
       },
     },
   ], width);

@@ -20,8 +20,8 @@
 - [x] Exec stage visibility + paste preview overlay; auto `pi-auto` after submit
 - PTY resize, mouse/scrollback, and alternate-screen polish
 - NDJSON detail view linked from the diagnostic overlay
-- Better task/run matching and stale-process diagnostics
-- Windows process integration tests
+- [x] Better task/run matching and stale-process diagnostics with live/stale/completed/unknown state
+- [x] Cross-platform natural-exit PTY lifecycle regression test
 - Safe raw-output capture/attach protocol for externally started TAKT sessions
 
 ## Phase 2 — later

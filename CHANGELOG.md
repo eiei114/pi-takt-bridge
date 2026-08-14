@@ -4,11 +4,16 @@
 
 - Add `takt_stop` and `takt_set_mode` tools so agents can recover without
   shell `taskkill` or manual `/takt:stop` / mode commands.
-- Add `replace` to `takt_exec_prompt` (default true) to stop a running
-  bridge-owned session before clear/exec/submit.
+- Add `replace` to `takt_exec_prompt` (default true) to reconcile, stop, wait,
+  dispose, and replace a running bridge-owned session before clear/exec/submit.
+- Reconcile natural PTY exits and expose `live`, `stale`, `completed`, or
+  `unknown` status with PID, stage, and last exit diagnostics; completed/stale
+  state no longer blocks the next bridge-owned exec.
+- Add fresh-runtime contract and natural-exit regression coverage for the five
+  Pi tools and controller lifecycle.
 - Track exec stages (`clearing` -> `waiting_prompt` -> `pasting` -> `sending_go` ->
-  `running`, plus stop/fail states) in tool updates, `takt_read_screen`, and the
-  stacked widget header.
+  `running`, `completed`, plus stop/fail states) in tool updates,
+  `takt_read_screen`, and the stacked widget header.
 - Overlay a truncated prompt preview during `pasting` / `sending_go` so long
   issue bodies do not look like a frozen widget.
 - Switch to `pi-auto` automatically after a successful `takt_exec_prompt`
