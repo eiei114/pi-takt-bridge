@@ -150,9 +150,10 @@ space.
 
 In the default `pi` mode the widget does not capture keyboard focus. Use
 `/takt:send` for explicit interactive input, `/takt:mode takt` for direct PTY
-focus, and `/takt:stop` to stop TAKT. When a bridge-owned child exits, its final
-widget contents stay on screen and Pi sends a success/error notification with
-the exit code.
+focus, and `/takt:stop` to stop TAKT. When a bridge-owned child exits or is
+stopped, the live widget is cleared and Pi sends a success/error notification
+with the exit code. Use `/takt:status` or `takt_read_screen` for final
+diagnostics.
 
 `/takt:status` remains available as an optional diagnostic overlay. It is not
 the execution view and is not polled into the live output widget.

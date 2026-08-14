@@ -8,8 +8,10 @@ leaving the Pi TUI.
 This is an early MVP. It deliberately uses TAKT's public `takt-acp` stdio
 interface for enqueueing and runs public TAKT CLI commands inside real PTYs.
 The live widget renders TAKT's terminal screen (including in-progress output,
-ANSI control sequences, prompts, and the final exit notification) instead of
-reducing bridge-owned execution to a status widget.
+ANSI control sequences, and prompts) instead of reducing bridge-owned
+execution to a status widget. It clears automatically when the bridge-owned
+process exits or is stopped; final diagnostics remain available through
+`/takt:status` and `takt_read_screen`.
 
 ## Prerequisites
 

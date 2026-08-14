@@ -89,6 +89,23 @@ test("project stack shows input mode even with no active sessions", () => {
   assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
+test("project stack hides bridge sessions after stop or natural completion", () => {
+  const runner = {
+    terminal: undefined,
+    hasSession: true,
+    isRunning: false,
+    resize() {},
+  };
+
+  for (const stage of ["stopped", "completed"]) {
+    const lines = renderTaktProjectStack([
+      { id: "finished", label: "finished", cwd: "C:/finished", runner, stage },
+    ], 40);
+    assert.ok(lines.every((line) => !line.includes("[finished]")));
+    assert.ok(lines.some((line) => line.includes("no active sessions")));
+  }
+});
+
 test("project stack overlays long prompt previews while pasting", async () => {
   const liveTerminal = new Terminal({ cols: 40, rows: 8, allowProposedApi: true });
   await new Promise((resolve) => liveTerminal.write("HUGE PASTED BODY SHOULD BE HIDDEN", resolve));

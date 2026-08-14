@@ -148,10 +148,7 @@ export function renderTaktProjectStack(
 ): string[] {
   const columns = normalizeWidgetWidth(width);
   const visibleProjects = [...projects]
-    .filter((project) =>
-      project.runner?.hasSession ||
-      hasObservedActivity(project.summary) ||
-      (project.stage !== undefined && project.stage !== "idle"))
+    .filter(isDisplayableProject)
     .sort(compareProjectActivity);
   const lines: string[] = [`input: ${formatTaktInputModeLine(inputMode)}`];
   let shownProjects = 0;
@@ -192,6 +189,22 @@ export function renderTaktProjectStack(
     }
   }
   return fitTaktWidgetLines(lines, columns);
+}
+
+/**
+ * Finished bridge-owned sessions must not keep the live widget mounted.
+ * Their diagnostics remain available through `takt_read_screen` and
+ * `/takt:status`, but the terminal panel itself is an active-session view.
+ */
+function isDisplayableProject(project: TaktProjectWidgetEntry): boolean {
+  if (project.stage === "stopped" || project.stage === "completed") {
+    return false;
+  }
+  return Boolean(
+    project.runner?.hasSession ||
+    hasObservedActivity(project.summary) ||
+    (project.stage !== undefined && project.stage !== "idle"),
+  );
 }
 
 /** Keep custom widget output inside Pi's terminal-width invariant. */

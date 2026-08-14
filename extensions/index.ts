@@ -722,6 +722,10 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       : this.activeRunningProject();
     project?.runner.reconcile();
     if (!project?.runner.isRunning) {
+      if (project?.runner.hasSession) {
+        await project.runner.dispose();
+      }
+      await this.showLive(false);
       return { project: project?.label, cwd: project?.cwd, stopped: false };
     }
 
@@ -740,6 +744,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       await project.runner.stop();
       await project.runner.waitForExit(TAKT_LIFECYCLE_TIMEOUT_MS);
       await waitUntilNotRunning(project.runner, undefined, TAKT_LIFECYCLE_TIMEOUT_MS);
+      await project.runner.dispose();
     } catch (error) {
       this.setProjectStage(project, "failed");
       throw new Error(`TAKT stop failed for ${project.label}: ${errorMessage(error)}`);
@@ -748,6 +753,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     if (this.inputMode !== "pi") {
       await this.setInputMode("pi", { quiet: true });
     }
+    await this.showLive(false);
     context.ui.notify(`TAKT stopped for ${project.label}.`, "info");
     return { project: project.label, cwd: project.cwd, stopped: true };
   }
@@ -1012,6 +1018,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       onUpdate?.(message);
     }
     this.notifyProjects();
+    if (stage === "stopped" || stage === "completed") {
+      void this.showLive(false);
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -1080,6 +1089,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         } else {
           this.notifyProjects();
         }
+        void this.showLive(false);
       },
     });
     const project: ManagedProject = {
@@ -1174,7 +1184,9 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
 
   private hasDisplayableProject(): boolean {
     return [...this.projects.values()].some((project) =>
-      project.runner.hasSession || hasSummaryActivity(project.summary),
+      project.stage !== "stopped" &&
+      project.stage !== "completed" &&
+      (project.runner.hasSession || hasSummaryActivity(project.summary)),
     );
   }
 

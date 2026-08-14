@@ -2,6 +2,8 @@
 
 ## 0.1.0 - Unreleased
 
+- Clear the stacked live widget when a bridge-owned TAKT process exits or is
+  stopped; final lifecycle diagnostics remain available through status tools.
 - Add `takt_project_setup` and `/takt:project:init` to create project-local
   `.takt` scaffolding, copy one selected global exec preset without copying
   runtime state, and register a reusable project profile idempotently.

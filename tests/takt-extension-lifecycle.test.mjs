@@ -16,17 +16,21 @@ const DEAD_OWNER_PID = "999999999";
 
 function createContext(cwd) {
   const notifications = [];
+  const widgetUpdates = [];
   return {
     cwd,
     mode: "tui",
     hasUI: true,
     notifications,
+    widgetUpdates,
     ui: {
       notify(message, type) {
         notifications.push({ message, type });
       },
       setStatus() {},
-      setWidget() {},
+      setWidget(key, widget, options) {
+        widgetUpdates.push({ key, widget, options });
+      },
       onTerminalInput() {
         return () => {};
       },
@@ -220,6 +224,35 @@ test("extension replaces owned exec and starts again after natural exit", async 
     assert.ok(firstClear >= 0 && firstClear < firstExec);
     assert.ok(firstExec < firstExit && firstExit < secondClear && secondClear < secondExec);
     assert.ok(secondExec < secondExit && secondExit < thirdClear && thirdClear < thirdExec);
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
+test("stopping a bridge-owned PTY clears the live widget", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-stop-widget-"));
+  const project = join(root, "project");
+  mkdirSync(project);
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  writeProfile(root, project);
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "none");
+  const { tools, events } = loadExtension();
+  const context = createContext(project);
+
+  try {
+    await invoke(tools, "takt_exec_prompt", {
+      profile: "pi-docs",
+      prompt: "stop and clear widget",
+      clear: false,
+      preset: "first",
+    }, context);
+    assert.ok(context.widgetUpdates.some((update) => update.widget !== undefined));
+
+    const result = await invoke(tools, "takt_stop", { profile: "pi-docs" }, context);
+    assert.equal(result.details.stopped, true);
+    assert.equal(context.widgetUpdates.at(-1)?.widget, undefined);
   } finally {
     await events.get("session_shutdown")?.({ reason: "quit" }, context);
     restoreEnvironment();
