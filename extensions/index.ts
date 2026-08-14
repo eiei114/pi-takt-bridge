@@ -40,6 +40,10 @@ import {
   TaktRunController,
   terminalEndsWithText,
 } from "../lib/takt-run-controller.ts";
+import {
+  setupProjectLocalTakt,
+  type TaktProjectSetupResult,
+} from "../lib/takt-project-setup.ts";
 import { readTaktSummary } from "../lib/takt-state.ts";
 import { formatTaktLastExit, type TaktLastExit, type TaktSessionStatus, type TaktSummary } from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
@@ -51,6 +55,16 @@ const TAKT_INPUT_PROMPT_TIMEOUT_MS = 15_000;
 const TAKT_POST_PASTE_SETTLE_MS = 200;
 const TAKT_LIFECYCLE_TIMEOUT_MS = 10_000;
 const TAKT_AUTO_SCREEN_ROWS = 24;
+
+function defaultProfileName(cwd: string): string {
+  const folder = cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? "project";
+  const slug = folder
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "project";
+  return normalizeProfileName(slug);
+}
 
 const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
   profile: Type.Optional(Type.String({ description: "Named TAKT profile; defaults to pi-docs" })),
@@ -68,6 +82,24 @@ const TAKT_EXEC_PROMPT_PARAMETERS = Type.Object({
 const TAKT_STOP_PARAMETERS = Type.Object({
   profile: Type.Optional(Type.String({
     description: "Named TAKT profile or project path; defaults to the active running project",
+  })),
+});
+
+const TAKT_PROJECT_SETUP_PARAMETERS = Type.Object({
+  profile: Type.Optional(Type.String({
+    description: "Named profile; defaults to a safe slug from the target folder name",
+  })),
+  cwd: Type.Optional(Type.String({
+    description: "Project folder; defaults to the current Pi project",
+  })),
+  preset: Type.Optional(Type.String({
+    description: "Exec preset to make project-local; defaults to the existing profile preset or pi-docs",
+  })),
+  copyGlobalPreset: Type.Optional(Type.Boolean({
+    description: "Copy only the selected preset from ~/.takt when the project does not have it",
+  })),
+  overwrite: Type.Optional(Type.Boolean({
+    description: "Replace an existing profile only when its cwd differs",
   })),
 });
 
@@ -797,6 +829,46 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
   }
 
+  async setupProject(options: {
+    profile?: string;
+    cwd?: string;
+    preset?: string;
+    copyGlobalPreset?: boolean;
+    overwrite?: boolean;
+  } = {}): Promise<TaktProjectSetupResult & { profile: string; registered: true }> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      throw new Error("TAKT bridge requires an interactive Pi UI");
+    }
+
+    const cwd = normalizeProjectPath(options.cwd?.trim() || context.cwd, context.cwd);
+    const profileName = normalizeProfileName(options.profile?.trim() || defaultProfileName(cwd));
+    const current = this.profiles.get(profileName);
+    if (
+      current
+      && projectPathKey(current.cwd) !== projectPathKey(cwd)
+      && options.overwrite !== true
+    ) {
+      throw new Error(
+        `TAKT profile already points elsewhere: ${profileName} → ${current.cwd}. `
+        + "Pass overwrite:true to replace it explicitly.",
+      );
+    }
+
+    const preset = options.preset?.trim() || current?.preset || "pi-docs";
+    const local = setupProjectLocalTakt({
+      cwd,
+      preset,
+      copyGlobalPreset: options.copyGlobalPreset,
+    });
+    this.ensureProject(cwd);
+    this.profiles.set(profileName, { name: profileName, cwd, preset: local.preset });
+    this.persistProfiles();
+    this.persistProjects();
+    await this.refreshProjects();
+    return { ...local, profile: profileName, registered: true };
+  }
+
   async listProfiles(): Promise<void> {
     const context = this.context;
     if (!context?.hasUI) {
@@ -1409,6 +1481,45 @@ export default function register(pi: ExtensionAPI): void {
   };
 
   pi.registerTool({
+    name: "takt_project_setup",
+    label: "TAKT Project Setup",
+    description: "Create project-local .takt scaffolding, copy one safe exec preset, and register a reusable profile.",
+    promptSnippet: "Register a TAKT project and prepare its local .takt preset",
+    promptGuidelines: [
+      "Use before takt_exec_prompt when the target profile or project-local .takt preset may be missing.",
+      "Pass the exact target cwd from the user or the current Pi project; do not guess a repository path.",
+      "The setup is idempotent and copies only the selected preset from the global TAKT directory; it never copies runs, tasks, sessions, logs, or credentials.",
+      "Use overwrite:true only when the user explicitly wants an existing profile moved to another cwd.",
+    ],
+    parameters: TAKT_PROJECT_SETUP_PARAMETERS,
+    async execute(_toolCallId, params, _signal, _onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
+      const result = await activeRuntime.setupProject(params);
+      const copied = result.copiedFiles.length > 0
+        ? `\ncopied: ${result.copiedFiles.join(", ")}`
+        : "";
+      const warnings = result.warnings.length > 0
+        ? `\nwarnings: ${result.warnings.join("; ")}`
+        : "";
+      return {
+        content: [{
+          type: "text",
+          text: [
+            `TAKT project ready: ${result.profile}`,
+            result.cwd,
+            `local .takt: ${result.taktDir}`,
+            `preset: ${result.preset} (${result.presetSource})`,
+            `registered: ${result.registered}`,
+            copied,
+            warnings,
+          ].filter(Boolean).join("\n"),
+        }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "takt_exec_prompt",
     label: "TAKT Exec Prompt",
     description: "Run a task through a named TAKT project profile, show raw output in the Pi widget, and submit /go.",
@@ -1632,6 +1743,25 @@ export default function register(pi: ExtensionAPI): void {
     description: "Register another repo or development folder for TAKT monitoring",
     handler: async (args, _context) => {
       await runtime?.addProject(args);
+    },
+  });
+
+  pi.registerCommand("takt:project:init", {
+    description: "Create project-local .takt scaffolding and register a named profile",
+    handler: async (args, context) => {
+      if (!runtime || !context.hasUI) {
+        return;
+      }
+      const profile = args.trim() || undefined;
+      try {
+        const result = await runtime.setupProject({ profile, cwd: context.cwd });
+        context.ui.notify(
+          `TAKT project ready: ${result.profile}\n${result.cwd}\npreset: ${result.preset} (${result.presetSource})`,
+          "info",
+        );
+      } catch (error) {
+        context.ui.notify(`TAKT project setup failed: ${errorMessage(error)}`, "error");
+      }
     },
   });
 

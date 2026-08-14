@@ -121,6 +121,7 @@ function configureEnvironment(root, command, logPath, taskMode) {
   const previous = new Map([
     ["APPDATA", process.env.APPDATA],
     ["XDG_CONFIG_HOME", process.env.XDG_CONFIG_HOME],
+    ["TAKT_CONFIG_DIR", process.env.TAKT_CONFIG_DIR],
     ["TAKT_COMMAND", process.env.TAKT_COMMAND],
     ["TEST_TAKT_LOG", process.env.TEST_TAKT_LOG],
     ["TEST_TASK_MODE", process.env.TEST_TASK_MODE],
@@ -129,6 +130,7 @@ function configureEnvironment(root, command, logPath, taskMode) {
   ]);
   process.env.APPDATA = root;
   process.env.XDG_CONFIG_HOME = root;
+  process.env.TAKT_CONFIG_DIR = root;
   process.env.TAKT_COMMAND = command;
   process.env.TEST_TAKT_LOG = logPath;
   process.env.TEST_TASK_MODE = taskMode;
@@ -218,6 +220,36 @@ test("extension replaces owned exec and starts again after natural exit", async 
     assert.ok(firstClear >= 0 && firstClear < firstExec);
     assert.ok(firstExec < firstExit && firstExit < secondClear && secondClear < secondExec);
     assert.ok(secondExec < secondExit && secondExit < thirdClear && thirdClear < thirdExec);
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
+test("project setup registers a profile and materializes a project-local preset", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-project-setup-extension-"));
+  const project = join(root, "project");
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  mkdirSync(project);
+  mkdirSync(join(root, "exec", "presets"), { recursive: true });
+  writeFileSync(join(root, "exec", "presets", "pi-docs.yaml"), "name: pi-docs\nworkers: []\n", "utf8");
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "none");
+  const { tools, events } = loadExtension();
+  const context = createContext(project);
+
+  try {
+    const result = await invoke(tools, "takt_project_setup", {
+      profile: "bridge",
+      cwd: project,
+      preset: "pi-docs",
+    }, context);
+    assert.equal(result.details.profile, "bridge");
+    assert.equal(result.details.presetSource, "global");
+    assert.equal(existsSync(join(project, ".takt", "exec", "presets", "pi-docs.yaml")), true);
+    assert.deepEqual(JSON.parse(readFileSync(join(root, "pi-takt-bridge", "profiles.json"), "utf8")).profiles, [
+      { name: "bridge", cwd: project, preset: "pi-docs" },
+    ]);
   } finally {
     await events.get("session_shutdown")?.({ reason: "quit" }, context);
     restoreEnvironment();

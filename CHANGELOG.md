@@ -2,6 +2,11 @@
 
 ## 0.1.0 - Unreleased
 
+- Add `takt_project_setup` and `/takt:project:init` to create project-local
+  `.takt` scaffolding, copy one selected global exec preset without copying
+  runtime state, and register a reusable project profile idempotently.
+- Ignore removed folders when loading the project registry so stale entries do
+  not prevent a fresh runtime from starting.
 - Add `takt_stop` and `takt_set_mode` tools so agents can recover without
   shell `taskkill` or manual `/takt:stop` / mode commands.
 - Add `replace` to `takt_exec_prompt` (default true) to reconcile, stop, wait,

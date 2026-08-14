@@ -26,6 +26,25 @@ indefinitely or stops a PTY it did not create.
 registry is stored in the user config directory, not in the vault. The current
 Pi folder is always included.
 
+For a one-shot project bootstrap, use `/takt:project:init [profile]`. It creates
+the project-local `.takt/exec/presets/` and `.takt/workflows/` directories,
+registers the project, and saves a named profile. The equivalent agent tool is
+`takt_project_setup`:
+
+```json
+{
+  "profile": "pi-takt-bridge",
+  "cwd": "C:/work/repo",
+  "preset": "pi-docs",
+  "copyGlobalPreset": true
+}
+```
+
+When the selected preset is absent locally, setup copies only that preset from
+the global TAKT directory. It does not copy tasks, runs, sessions, logs, or
+credentials. Existing local presets are never overwritten, so the operation is
+safe to repeat.
+
 ### Named project profiles
 
 Use a profile when a project is used repeatedly. Register the path and default

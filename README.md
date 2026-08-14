@@ -37,6 +37,7 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:live` | Show the current live/final TAKT widget |
 | `/takt:enqueue [path]` | Ask TAKT ACP to add a worktree task in a selected folder |
 | `/takt:project [path]` | Register another repo/folder for detection and stacked display |
+| `/takt:project:init [profile]` | Create project-local `.takt` scaffolding and register a profile |
 | `/takt:project:remove [path]` | Stop watching a registered folder |
 | `/takt:profile:add [name]` | Save a named folder and optional exec preset once |
 | `/takt:profile [name]` | List saved project profiles |
@@ -61,6 +62,13 @@ also use `takt_stop` and `takt_set_mode` for recovery. `takt_read_screen` report
 available. If a fresh Pi runtime is missing one of these tools or the named
 profile does not resolve to the requested cwd, the skill reports the exact
 reload/package or profile/cwd mismatch instead of guessing a path.
+
+For a new target, the skill first uses `takt_project_setup` when available. It
+creates project-local `.takt/exec/presets` and `.takt/workflows`, registers the
+project/profile, and copies only the selected exec preset from the global TAKT
+directory when the project does not already have it. Runtime state, tasks,
+runs, sessions, logs, and credentials are never copied. Setup is idempotent;
+`overwrite` is required to move an existing profile to another folder.
 
 After a session is live, dual input modes let you keep talking to TAKT without
 leaving Pi:

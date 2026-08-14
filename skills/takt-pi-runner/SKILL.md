@@ -9,16 +9,43 @@ Run TAKT through the `pi-takt-bridge` tool. The bridge owns the PTY, project
 cwd, preset, prompt submission, and `/go`; this keeps raw TAKT output visible
 above the normal Pi editor.
 
+## Project bootstrap
+
+Use `takt_project_setup` before the first run for a repository that is not yet
+registered or does not have a project-local `.takt` directory. Pass the exact
+target `cwd`, a stable `profile` name, and the intended `preset`:
+
+```json
+{
+  "profile": "pi-takt-bridge",
+  "cwd": "C:/Users/Keisu/Projects/OSS/pi-takt-bridge",
+  "preset": "pi-docs",
+  "copyGlobalPreset": true
+}
+```
+
+This creates `.takt/exec/presets/` and `.takt/workflows/`, registers both the
+project and named profile, and copies only the selected preset from the global
+TAKT directory when the project does not already have it. It never copies
+tasks, runs, sessions, logs, credentials, or other global runtime state.
+The operation is idempotent. Use `overwrite: true` only when explicitly moving
+an existing profile to a different folder.
+
+For interactive setup, `/takt:project:init [profile]` performs the same setup
+for the current Pi project. Use `/takt:project` or `/takt:profile:add` only for
+manual registration or when the setup tool is unavailable.
+
 ## Default workflow
 
 1. Prefer a concise TAKT prompt. Preserve issue numbers, file paths, constraints,
    and code fences. Long GitHub issue bodies may be shortened to the actionable
    scope (files to change, must/must-not, verification). The widget already
    truncates long pasted bodies during `pasting` / `sending_go`.
-2. Use the named profile `pi-docs` unless the user explicitly names another
+2. If the target profile/project is not ready, call `takt_project_setup` first.
+3. Use the named profile `pi-docs` unless the user explicitly names another
    profile.
-3. Call `takt_read_screen` first when a session may already be running.
-4. Call `takt_exec_prompt` with:
+4. Call `takt_read_screen` first when a session may already be running.
+5. Call `takt_exec_prompt` with:
 
    ```json
    {
@@ -41,6 +68,9 @@ above the normal Pi editor.
   first, then call it again with `replace: true` (the default) or call `takt_stop`
   first. Replacement reconciles, stops the bridge-owned PTY, waits, disposes,
   clears, and only then starts a fresh PTY.
+- If the profile is missing, call `takt_project_setup` with the exact target cwd
+  instead of editing `profiles.json` manually. If the setup tool is missing,
+  report the runtime/package mismatch and stop.
 - If the widget looks frozen, read `status:`, `pid:`, `stage:`, and `lastExit:`
   from `takt_read_screen` before assuming a hang. `pasting` / `sending_go`
   intentionally show a prompt preview; `live`, `stale`, `completed`, and
@@ -60,10 +90,10 @@ above the normal Pi editor.
   starts a fresh `takt exec <preset>`.
 - Do not send the task body and `/go` through separate ad-hoc mechanisms unless
   recovering inside an already-running `pi-auto` session with `takt_send_input`.
-- If any required bridge tool is missing, its runtime is not initialized after
-  a fresh Pi reload, or the profile is missing, stop. Report the exact tool name,
-  profile name, and target cwd as a reload/package mismatch; do not use `taskkill`,
-  Computer Use, guessed paths, or fall back to Claude/Codex/direct shell execution.
+- If any required bridge tool is missing or its runtime is not initialized after
+  a fresh Pi reload, stop. Report the exact tool name, profile name, and target
+  cwd as a reload/package mismatch; do not use `taskkill`, Computer Use, guessed
+  paths, or fall back to Claude/Codex/direct shell execution.
 - If the user explicitly requests a different profile, pass that profile name
   and keep the chosen task body unchanged.
 

@@ -47,7 +47,8 @@ export function loadProjectPaths(filePath = defaultProjectRegistryPath()): strin
     if (!isRecord(parsed) || !Array.isArray(parsed.projects)) {
       return [];
     }
-    return dedupeProjectPaths(parsed.projects.filter((value): value is string => typeof value === "string"));
+    return dedupeProjectPaths(parsed.projects.filter((value): value is string => typeof value === "string"))
+      .filter((projectPath) => existsSync(projectPath));
   } catch {
     return [];
   }

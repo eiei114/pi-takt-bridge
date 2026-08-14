@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -18,7 +18,23 @@ test("project registry persists only normalized project paths", () => {
   const base = mkdtempSync(join(tmpdir(), "pi-takt-bridge-projects-"));
   const registry = join(base, "config", "projects.json");
   const repo = join(base, "repo");
+  mkdirSync(repo);
   saveProjectPaths([repo, repo], registry);
   assert.deepEqual(loadProjectPaths(registry), [repo]);
   assert.match(readFileSync(registry, "utf8"), /"version": 1/);
+});
+
+test("project registry ignores folders that were removed after registration", () => {
+  const base = mkdtempSync(join(tmpdir(), "pi-takt-bridge-projects-stale-"));
+  const registry = join(base, "config", "projects.json");
+  const existing = join(base, "existing");
+  mkdirSync(existing);
+  mkdirSync(join(base, "config"));
+  writeFileSync(
+    registry,
+    JSON.stringify({ version: 1, projects: [existing, join(base, "removed")] }),
+    "utf8",
+  );
+
+  assert.deepEqual(loadProjectPaths(registry), [existing]);
 });

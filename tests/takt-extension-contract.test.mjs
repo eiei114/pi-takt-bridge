@@ -25,12 +25,15 @@ test("fresh Pi runtime publishes all TAKT control tools and replace schema", () 
 
   assert.deepEqual([...tools.keys()].sort(), [
     "takt_exec_prompt",
+    "takt_project_setup",
     "takt_read_screen",
     "takt_send_input",
     "takt_set_mode",
     "takt_stop",
   ]);
   assert.equal(tools.get("takt_exec_prompt").parameters.properties.replace.type, "boolean");
+  assert.equal(tools.get("takt_project_setup").parameters.properties.cwd.type, "string");
+  assert.equal(tools.get("takt_project_setup").parameters.properties.copyGlobalPreset.type, "boolean");
 });
 
 test("fresh Pi loader exposes the executable tool schema", async () => {
@@ -42,6 +45,7 @@ test("fresh Pi loader exposes the executable tool schema", async () => {
   const tools = loaded.extensions[0].tools;
   assert.deepEqual([...tools.keys()].sort(), [
     "takt_exec_prompt",
+    "takt_project_setup",
     "takt_read_screen",
     "takt_send_input",
     "takt_set_mode",
@@ -51,6 +55,9 @@ test("fresh Pi loader exposes the executable tool schema", async () => {
   assert.equal(execTool.parameters.type, "object");
   assert.equal(execTool.parameters.properties.replace.type, "boolean");
   assert.ok(execTool.parameters.required.includes("prompt"));
+  const setupTool = tools.get("takt_project_setup").definition;
+  assert.equal(setupTool.parameters.properties.cwd.type, "string");
+  assert.equal(setupTool.parameters.properties.copyGlobalPreset.type, "boolean");
 });
 
 test("a second fresh extension registration publishes the same tool contract", () => {

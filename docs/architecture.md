@@ -35,6 +35,13 @@ Pi command / project path
 - Named profiles persist an explicit alias, project cwd, and optional exec preset
   in the user config directory. The bridge does not scan arbitrary folders or
   silently guess a similarly named repository.
+- `takt_project_setup` is the explicit bootstrap seam for new targets. It
+  creates project-local `.takt/exec/presets` and `.takt/workflows`, registers
+  the project/profile, and may copy only the selected global exec preset. It
+  never copies run state, sessions, logs, tasks, or credentials.
+- Project registry loading drops folders that no longer exist, preventing a
+  stale registration from failing runtime initialization before the active
+  project can be observed.
 - The bundled Agent Skill uses `takt_exec_prompt` for the profile-bound prompt
   submission flow; shell execution is not used as a substitute because it would
   hide the child PTY from the Pi widget.
