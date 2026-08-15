@@ -15,6 +15,8 @@ import {
 import { spawnCommand, stopChild } from "./process-control.ts";
 import { resolveCommand } from "./takt-state.ts";
 
+const ACP_CANCEL_NOTIFY_TIMEOUT_MS = 2_000;
+
 export interface TaktAcpClientOptions {
   cwd: string;
   command?: string;
@@ -82,6 +84,9 @@ export class TaktAcpClient {
       cwd: this.options.cwd,
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      // Give cancellation a private POSIX process group so descendants do
+      // not survive when the ACP server ignores termination.
+      ...(process.platform !== "win32" ? { detached: true } : {}),
     });
     this.child = child;
     const stderr = collectStderr(child);
@@ -151,12 +156,27 @@ export class TaktAcpClient {
   }
 
   async cancel(): Promise<void> {
-    if (this.connection && this.sessionId) {
-      await this.connection.notify(methods.agent.session.cancel, { sessionId: this.sessionId });
-    }
-    if (this.child) {
-      await terminate(this.child);
-      this.child = undefined;
+    const connection = this.connection;
+    const sessionId = this.sessionId;
+    const child = this.child;
+    try {
+      if (connection && sessionId) {
+        await withTimeout(
+          connection.notify(methods.agent.session.cancel, { sessionId }),
+          ACP_CANCEL_NOTIFY_TIMEOUT_MS,
+          "TAKT ACP cancel notification timed out",
+        );
+      }
+    } finally {
+      // A broken ACP stream must not prevent the owned process from being
+      // terminated. Keep the identity check so a newer enqueue cannot be
+      // cleared by a late cancellation.
+      if (child) {
+        await terminate(child);
+        if (this.child === child) {
+          this.child = undefined;
+        }
+      }
     }
   }
 
@@ -176,4 +196,21 @@ function collectStderr(child: ChildProcess): { value: string } {
 
 async function terminate(child: ChildProcess): Promise<void> {
   await stopChild(child);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }

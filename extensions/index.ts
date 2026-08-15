@@ -66,6 +66,7 @@ const REFRESH_INTERVAL_MS = 2_000;
 const TAKT_INPUT_PROMPT_TIMEOUT_MS = 15_000;
 const TAKT_ASSISTANT_REPLY_TIMEOUT_MS = 120_000;
 const TAKT_GO_ACCEPT_TIMEOUT_MS = 15_000;
+const TAKT_GO_OUTPUT_DRAIN_GRACE_MS = 250;
 const TAKT_RESUME_MENU_TIMEOUT_MS = 15_000;
 const TAKT_LIFECYCLE_TIMEOUT_MS = 10_000;
 const TAKT_AUTO_SCREEN_ROWS = 24;
@@ -1968,18 +1969,28 @@ async function waitForTaktInputAccepted(
   timeoutMs: number,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
+  let postExitDeadline: number | undefined;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
-    if (!runner.isRunning) {
-      const result = await runner.waitForExit();
-      throw new Error(`takt exec exited while submitting /go (exit ${result?.code ?? "unknown"})`);
-    }
     if (
       runner.screenVersion > previousScreenVersion &&
       !terminalEndsWithText(runner.terminal, "Assistant>") &&
       terminalContainsText(runner.terminal, "Assistant> /go")
     ) {
       return;
+    }
+    if (!runner.isRunning) {
+      const result = await runner.waitForExit();
+      if (result?.code !== 0) {
+        throw new Error(`takt exec exited while submitting /go (exit ${result?.code ?? "unknown"})`);
+      }
+      // On macOS, node-pty can deliver the final data event after onExit.
+      // Keep a short drain window so a clean, fast TAKT exit is not reported
+      // as a failed /go submission before xterm has parsed the output.
+      postExitDeadline ??= Date.now() + TAKT_GO_OUTPUT_DRAIN_GRACE_MS;
+      if (Date.now() >= postExitDeadline) {
+        throw new Error(`takt exec exited while submitting /go (exit ${result?.code ?? "unknown"})`);
+      }
     }
     await delay(50);
   }

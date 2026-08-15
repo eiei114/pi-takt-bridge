@@ -247,3 +247,12 @@ is `live` only when a matching metadata/task record exposes a live owner PID; a
 dead PID is `stale`, and a missing PID is `unknown`. `completed` and `stale`
 observations do not block the next bridge-owned exec; `live` and unresolved
 `unknown` sessions remain protected from duplicate starts.
+
+## macOS environment
+
+Pi started from Finder or a launch agent can have a shorter `PATH` than a
+Terminal session. If `takt` works in Terminal but Pi reports `ENOENT`, set
+absolute paths with `TAKT_COMMAND=/opt/homebrew/bin/takt` and
+`TAKT_ACP_COMMAND=/opt/homebrew/bin/takt-acp` (adjust for Intel Homebrew or a
+custom install). If `node-pty` has no matching native prebuild, install Xcode
+Command Line Tools with `xcode-select --install`.

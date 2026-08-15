@@ -1,7 +1,7 @@
 import xterm from "@xterm/headless";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import type { Terminal as XtermTerminal } from "@xterm/headless";
-import { killWindowsProcessTree } from "./process-control.ts";
+import { killUnixProcessGroup, killWindowsProcessTree } from "./process-control.ts";
 import { resolveCommand } from "./takt-state.ts";
 import type { TaktLastExit, TaktSessionStatus } from "./takt-types.ts";
 
@@ -346,7 +346,9 @@ async function forceKillPty(pty: IPty): Promise<void> {
     await killWindowsProcessTree(pty.pid);
     return;
   }
-  pty.kill("SIGKILL");
+  if (!killUnixProcessGroup(pty.pid, "SIGKILL")) {
+    pty.kill("SIGKILL");
+  }
 }
 
 function createPtyCommand(command: string, args: string[]): { file: string; args: string[] } {

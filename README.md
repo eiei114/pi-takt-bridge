@@ -21,6 +21,8 @@ compact `preparing` card. Final diagnostics remain available through
 - Pi 0.83 or later
 - TAKT 0.58 or later installed as the `takt` and `takt-acp` commands
 - A configured TAKT provider/model
+- On macOS, `node-pty` may need Xcode Command Line Tools when a matching
+  native prebuild is unavailable (`xcode-select --install`).
 
 ## Install
 
@@ -131,8 +133,16 @@ instead of silently guessing a path.
 ## Configuration
 
 The bridge uses `takt-acp` and `takt` from `PATH`. Override the executable names
-when needed with `TAKT_ACP_COMMAND` and `TAKT_COMMAND`. No Pi provider setting
-is changed by this package.
+when needed with `TAKT_ACP_COMMAND` and `TAKT_COMMAND`. Pi launched from a
+macOS GUI, Finder, or a launch agent may not inherit Homebrew, nvm, Volta, or
+npm-global paths; use absolute command paths in that case, for example:
+
+```text
+TAKT_COMMAND=/opt/homebrew/bin/takt
+TAKT_ACP_COMMAND=/opt/homebrew/bin/takt-acp
+```
+
+No Pi provider setting is changed by this package.
 
 See [`docs/usage.md`](docs/usage.md) and
 [`docs/architecture.md`](docs/architecture.md) for the current boundaries and

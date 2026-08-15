@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Fix a macOS PTY race where a clean, fast TAKT exit could arrive before the
+  final `/go` acknowledgement was parsed, causing a successful submission to
+  be reported as failed.
+- Terminate ACP descendants through a dedicated POSIX process group and always
+  clean up the owned child when ACP cancellation fails or times out.
+- Add macOS CI coverage and document native `node-pty` and GUI-launched Pi
+  `PATH` requirements.
+
 ## 0.2.0 - 2026-08-15
 
 - Add `goMode: "manual"` and `takt_submit_go` so task clarification can finish

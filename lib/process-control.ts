@@ -8,6 +8,19 @@ export function spawnCommand(command: string, args: string[], options: SpawnOpti
   return spawn(command, args, options);
 }
 
+/** Send a signal to a dedicated POSIX process group when one exists. */
+export function killUnixProcessGroup(pid: number, signal: NodeJS.Signals = "SIGKILL"): boolean {
+  if (process.platform === "win32" || !Number.isInteger(pid) || pid <= 1) {
+    return false;
+  }
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Stop a child with a graceful signal, then kill its process tree if needed. */
 export async function stopChild(
   child: ChildProcess,
@@ -19,7 +32,10 @@ export async function stopChild(
   }
 
   try {
-    child.kill(signal);
+    const signaledGroup = child.pid !== undefined && killUnixProcessGroup(child.pid, signal);
+    if (!signaledGroup) {
+      child.kill(signal);
+    }
   } catch {
     return;
   }
@@ -31,10 +47,13 @@ export async function stopChild(
   if (process.platform === "win32" && child.pid !== undefined) {
     await killWindowsProcessTree(child.pid);
   } else {
-    try {
-      child.kill("SIGKILL");
-    } catch {
-      // Best effort; the close listener still reconciles the next state poll.
+    const killedGroup = child.pid !== undefined && killUnixProcessGroup(child.pid, "SIGKILL");
+    if (!killedGroup) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Best effort; the close listener still reconciles the next state poll.
+      }
     }
   }
   await waitForExit(child, graceMs);
