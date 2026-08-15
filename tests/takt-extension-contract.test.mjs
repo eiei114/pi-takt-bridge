@@ -28,11 +28,16 @@ test("fresh Pi runtime publishes all TAKT control tools and replace schema", () 
     "takt_exec_prompt",
     "takt_project_setup",
     "takt_read_screen",
+    "takt_resume_run",
     "takt_send_input",
     "takt_set_mode",
     "takt_stop",
+    "takt_submit_go",
   ]);
   assert.equal(tools.get("takt_exec_prompt").parameters.properties.replace.type, "boolean");
+  assert.ok(tools.get("takt_exec_prompt").parameters.properties.goMode.anyOf);
+  assert.equal(tools.get("takt_stop").parameters.properties.forceObserved.type, "boolean");
+  assert.equal(tools.get("takt_resume_run").parameters.properties.model.type, "string");
   assert.equal(tools.get("takt_project_setup").parameters.properties.cwd.type, "string");
   assert.equal(tools.get("takt_project_setup").parameters.properties.copyGlobalPreset.type, "boolean");
 });
@@ -49,13 +54,16 @@ test("fresh Pi loader exposes the executable tool schema", async () => {
     "takt_exec_prompt",
     "takt_project_setup",
     "takt_read_screen",
+    "takt_resume_run",
     "takt_send_input",
     "takt_set_mode",
     "takt_stop",
+    "takt_submit_go",
   ]);
   const execTool = tools.get("takt_exec_prompt").definition;
   assert.equal(execTool.parameters.type, "object");
   assert.equal(execTool.parameters.properties.replace.type, "boolean");
+  assert.ok(execTool.parameters.properties.goMode.anyOf);
   assert.ok(execTool.parameters.required.includes("prompt"));
   const setupTool = tools.get("takt_project_setup").definition;
   assert.equal(setupTool.parameters.properties.cwd.type, "string");

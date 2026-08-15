@@ -98,6 +98,7 @@ export class TaktRunController {
   private resolveExit: ((result: TaktExitResult) => void) | undefined;
   private lastExitResult: TaktExitResult | undefined;
   private lastPid: number | undefined;
+  private outputVersion = 0;
   private sessionStatus: TaktSessionStatus = "unknown";
   private readonly options: TaktRunControllerOptions;
   private readonly interrupt: InterruptPty;
@@ -132,6 +133,10 @@ export class TaktRunController {
 
   get lastExit(): TaktExitResult | undefined {
     return this.lastExitResult;
+  }
+
+  get screenVersion(): number {
+    return this.outputVersion;
   }
 
   subscribe(listener: () => void): () => void {
@@ -204,7 +209,10 @@ export class TaktRunController {
     });
 
     pty.onData((data) => {
-      terminal.write(data, () => this.notifyScreenChange());
+      terminal.write(data, () => {
+        this.outputVersion += 1;
+        this.notifyScreenChange();
+      });
     });
     pty.onExit(({ exitCode, signal }) => {
       const result: TaktExitResult = { code: exitCode, signal };

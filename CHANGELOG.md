@@ -1,7 +1,29 @@
 # Changelog
 
-## 0.1.0 - Unreleased
+## 0.2.0 - 2026-08-15
 
+- Add `goMode: "manual"` and `takt_submit_go` so task clarification can finish
+  without any automatic `/go`; send GO commands as raw text + Enter instead of
+  bracketed paste.
+- Add bridge-native checkpoint recovery with `takt_resume_run`, explicit
+  provider/model routing, and automatic `Requeue` selection without clearing
+  or replaying the task body.
+- Wait for a fresh post-clarification `Assistant>` prompt before `/go`, then
+  verify acknowledgement instead of relying on a fixed delay.
+- Reconcile bridge-owned stops and explicitly forced stale/unknown metadata to
+  `aborted` atomically while preserving checkpoint fields; external live PIDs
+  remain read-only.
+- Report terminal workflow state as `status: completed` / `running: false`
+  even when the bridge still owns TAKT's long-lived interactive PTY; expose
+  that transport detail separately as `ptyRunning`.
+- Show the active workflow's current step and phase as a compact ASCII progress
+  bar, using the immutable run workflow bundle with a bridge-stage fallback
+  while metadata is still being created.
+- Keep the background project-stack refresh on persistent run metadata instead
+  of invoking `takt list`; queue reconciliation remains available on demand
+  through diagnostics and malformed task queues no longer spam Pi warnings.
+- Aggregate repeated unexpected background refresh failures into one warning
+  plus an `xN` status count, resetting after recovery.
 - Hide quiet external pending/blocked/failed/stale cards after 30 minutes and
   show all queue counts, without deleting TAKT task or run data.
 - Add `takt_enqueue_task` and the `takt-pi-task-planner` Skill for a confirmed

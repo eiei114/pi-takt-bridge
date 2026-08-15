@@ -29,8 +29,10 @@ test("summarizeTaktPrompt truncates long multiline prompts", () => {
   assert.ok(!preview.includes("line c"));
 });
 
-test("overlay stages cover paste and /go only", () => {
+test("overlay stages cover prompt handoff and /go", () => {
   assert.equal(shouldOverlayPromptPreview("pasting"), true);
+  assert.equal(shouldOverlayPromptPreview("waiting_go"), true);
+  assert.equal(shouldOverlayPromptPreview("awaiting_go"), false);
   assert.equal(shouldOverlayPromptPreview("sending_go"), true);
   assert.equal(shouldOverlayPromptPreview("running"), false);
   assert.equal(shouldOverlayPromptPreview("waiting_prompt"), false);

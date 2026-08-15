@@ -4,7 +4,34 @@ import test from "node:test";
 const xterm = await import("@xterm/headless");
 const { visibleWidth } = await import("@earendil-works/pi-tui");
 const { createTaktLiveWidget, createTaktProjectStackWidget, renderTaktProjectStack, renderTaktTerminal } = await import("../lib/takt-live-panel.ts");
+const { renderTaktWorkflowProgress } = await import("../lib/takt-progress.ts");
 const Terminal = xterm.default?.Terminal ?? xterm.Terminal;
+
+test("workflow progress renders an ASCII bar with the current step and phase", () => {
+  const line = renderTaktWorkflowProgress({
+    run: {
+      slug: "run",
+      task: "task",
+      workflow: "default",
+      workflowSteps: ["plan", "implement", "review"],
+      status: "running",
+      sessionStatus: "live",
+      currentStep: "implement",
+      phase: 1,
+      currentIteration: 2,
+    },
+  });
+
+  assert.match(line ?? "", /flow default \[[#>-]+\]/);
+  assert.match(line ?? "", /2\/3 step: implement/);
+  assert.match(line ?? "", /p1\/3 execute/);
+});
+
+test("workflow progress falls back to bridge lifecycle before run metadata exists", () => {
+  const line = renderTaktWorkflowProgress({ bridgeStage: "waiting_prompt" });
+  assert.match(line ?? "", /bridge \[[#>-]+\]/);
+  assert.match(line ?? "", /stage waiting prompt/);
+});
 
 test("live widget renders the PTY screen instead of raw cursor escapes", async () => {
   const terminal = new Terminal({ cols: 24, rows: 4, allowProposedApi: true });

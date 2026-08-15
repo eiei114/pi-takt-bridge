@@ -57,6 +57,11 @@ manual registration or when the setup tool is unavailable.
    }
    ```
 
+   When the user requires an approval boundary, pass `goMode: "manual"`
+   instead. Wait for `awaitingGo: true`, read the live screen, and call
+   `takt_submit_go` only after approval. Do not simulate approval by sending
+   `/go` through `takt_send_input`.
+
 5. Let the tool return after the prompt and `/go` are submitted. A successful
    submit switches input mode to `pi-auto` automatically. TAKT's raw live screen
    remains in the Pi project stack; do not start a second TAKT process or claim
@@ -64,6 +69,14 @@ manual registration or when the setup tool is unavailable.
 
 ## Recovery
 
+- When the user asks to continue the existing checkpoint rather than restart
+  the task, call `takt_stop` if the bridge-owned PTY is still live, then call
+  `takt_resume_run` with the same profile and the explicit `provider` / `model`.
+  The resume tool opens TAKT's resume UI, selects `Requeue`, preserves the run
+  checkpoint, and does not call `takt clear` or submit the task body again.
+- If only stale or ownerless `running` metadata remains, inspect it first with
+  `takt_read_screen`, then use `takt_stop` with `forceObserved: true`. This may
+  mark stale/unknown metadata aborted but never kills an external live PID.
 - If `takt_exec_prompt` reports an already-running session, call `takt_read_screen`
   first, then call it again with `replace: true` (the default) or call `takt_stop`
   first. Replacement reconciles, stops the bridge-owned PTY, waits, disposes,
@@ -86,8 +99,8 @@ manual registration or when the setup tool is unavailable.
   when the task asks for Pi-only execution. Preserve that requirement exactly.
 - Never use shell `takt exec`, `cd`, or a manually typed absolute path when
   `takt_exec_prompt` is available. The named profile is the path boundary.
-- Do not use `--continue`. The default tool flow clears the old session and
-  starts a fresh `takt exec <preset>`.
+- Do not use `--continue`. Use `takt_resume_run` for checkpoint recovery; use
+  `takt_exec_prompt` only when a fresh clear-and-exec task is intended.
 - Do not send the task body and `/go` through separate ad-hoc mechanisms unless
   recovering inside an already-running `pi-auto` session with `takt_send_input`.
 - If any required bridge tool is missing or its runtime is not initialized after

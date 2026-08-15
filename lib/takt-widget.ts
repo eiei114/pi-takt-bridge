@@ -1,3 +1,4 @@
+import { renderTaktWorkflowProgress } from "./takt-progress.ts";
 import { formatTaktLastExit, type TaktRunSnapshot, type TaktSummary } from "./takt-types.ts";
 
 const DEFAULT_WIDTH = 96;
@@ -35,6 +36,14 @@ export function renderTaktDetails(summary: TaktSummary): string[] {
   ];
 
   lines.push(`session: ${summary.status}`);
+  const activeRun = summary.runs.find((run) =>
+    run.status === "running" || run.status === "stale" ||
+    run.sessionStatus === "live" || run.sessionStatus === "stale",
+  );
+  const progress = renderTaktWorkflowProgress({ run: activeRun });
+  if (progress) {
+    lines.push(progress);
+  }
   if (summary.pid !== undefined) {
     lines.push(`pid: ${summary.pid}`);
   }

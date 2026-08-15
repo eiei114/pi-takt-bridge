@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnCommand } from "./process-control.ts";
 import type {
@@ -30,6 +30,51 @@ const TASK_TIME_FIELDS = ["createdAt", "startedAt", "completedAt"] as const;
 export interface TaktStateOptions {
   command?: string;
   now?: number;
+  /** Skip the CLI task queue and derive the snapshot from persistent run metadata only. */
+  includeTaskList?: boolean;
+}
+
+export interface TaktRunReconcileResult {
+  runSlug: string;
+  reconciled: boolean;
+}
+
+/**
+ * Close a persisted `running` record after the bridge has conclusively stopped
+ * its owner, or after an operator explicitly chooses to recover stale state.
+ * Unknown TAKT fields (including resume_point) are intentionally preserved.
+ */
+export function reconcileRunAsAborted(
+  cwd: string,
+  runSlug: string,
+  reason: string,
+  now = new Date(),
+): TaktRunReconcileResult {
+  const metaPath = resolve(cwd, ".takt", "runs", runSlug, "meta.json");
+  let value: unknown;
+  try {
+    value = JSON.parse(readFileSync(metaPath, "utf8"));
+  } catch {
+    return { runSlug, reconciled: false };
+  }
+  if (!isRecord(value) || value.runSlug !== runSlug || value.status !== "running") {
+    return { runSlug, reconciled: false };
+  }
+
+  const timestamp = now.toISOString();
+  const step = isNonEmptyString(value.currentStep) ? value.currentStep : "unknown";
+  const next = {
+    ...value,
+    status: "aborted",
+    endTime: timestamp,
+    updatedAt: timestamp,
+    reason,
+    failure: { step, error: reason },
+  };
+  const temporaryPath = `${metaPath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  renameSync(temporaryPath, metaPath);
+  return { runSlug, reconciled: true };
 }
 
 export function parseRunMeta(value: unknown): TaktRunMeta | undefined {
@@ -124,7 +169,11 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
-export function snapshotRun(meta: TaktRunMeta, ownerPid?: number): TaktRunSnapshot {
+export function snapshotRun(
+  meta: TaktRunMeta,
+  ownerPid?: number,
+  workflowSteps?: readonly string[],
+): TaktRunSnapshot {
   const pid = ownerPid ?? meta.ownerPid ?? meta.pid;
   const status = classifyRunStatus(meta, pid);
   const sessionStatus = classifySessionStatus(meta, pid);
@@ -133,6 +182,7 @@ export function snapshotRun(meta: TaktRunMeta, ownerPid?: number): TaktRunSnapsh
     slug: meta.runSlug,
     task: meta.task,
     workflow: meta.workflow,
+    ...(workflowSteps && workflowSteps.length > 0 ? { workflowSteps: [...workflowSteps] } : {}),
     status,
     sessionStatus,
     ...(pid !== undefined ? { pid } : {}),
@@ -167,7 +217,10 @@ export function readRunSnapshots(cwd: string, taskItems: readonly TaktTaskItem[]
         continue;
       }
       const ownerPid = findOwnerPid(meta, taskItems);
-      snapshots.push(snapshotRun(meta, ownerPid));
+      const workflowSteps = meta.status === "running"
+        ? readWorkflowStepNames(cwd, entry.name)
+        : undefined;
+      snapshots.push(snapshotRun(meta, ownerPid, workflowSteps));
     } catch {
       // A run can be observed while TAKT is replacing meta.json. Ignore it
       // for this poll and let the next refresh reconcile it.
@@ -177,8 +230,40 @@ export function readRunSnapshots(cwd: string, taskItems: readonly TaktTaskItem[]
   return snapshots.sort(compareRuns);
 }
 
+function readWorkflowStepNames(cwd: string, runSlug: string): string[] | undefined {
+  try {
+    const bundleRoot = resolve(cwd, ".takt", "runs", runSlug, "workflow-bundle");
+    const manifest = JSON.parse(readFileSync(resolve(bundleRoot, "manifest.json"), "utf8"));
+    if (!isRecord(manifest) || !isRecord(manifest.root) || !isRecord(manifest.nodes)) {
+      return undefined;
+    }
+    const rootNodeId = manifest.root.nodeId;
+    if (!isNonEmptyString(rootNodeId) || !isSha256(rootNodeId)) {
+      return undefined;
+    }
+    const objectHash = manifest.nodes[rootNodeId];
+    if (!isNonEmptyString(objectHash) || !isSha256(objectHash)) {
+      return undefined;
+    }
+    const node = JSON.parse(readFileSync(resolve(bundleRoot, "objects", `${objectHash}.json`), "utf8"));
+    if (!isRecord(node) || !isRecord(node.config) || !Array.isArray(node.config.steps)) {
+      return undefined;
+    }
+    const names = node.config.steps
+      .map((step) => isRecord(step) && isNonEmptyString(step.name) ? step.name.trim() : undefined)
+      .filter((name): name is string => name !== undefined);
+    return names.length > 0 ? names : undefined;
+  } catch {
+    // Workflow bundles are published after run metadata; use currentStep/phase
+    // until the immutable bundle becomes available or when running older TAKT.
+    return undefined;
+  }
+}
+
 export async function readTaktSummary(cwd: string, options: TaktStateOptions = {}): Promise<TaktSummary> {
-  const taskItems = await readTaskItems(cwd, options.command);
+  const taskItems = options.includeTaskList === false
+    ? []
+    : await readTaskItems(cwd, options.command);
   const runs = readRunSnapshots(cwd, taskItems);
   const pending = taskItems.filter((item) => item.kind === "pending").length;
   const queueRunning = taskItems.filter((item) => item.kind === "running").length;
@@ -436,6 +521,10 @@ function isInteger(value: unknown): value is number {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value !== "";
+}
+
+function isSha256(value: string): boolean {
+  return /^[a-f0-9]{64}$/i.test(value);
 }
 
 function errorMessage(error: unknown): string {

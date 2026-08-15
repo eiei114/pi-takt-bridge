@@ -26,6 +26,21 @@ test("widget renders a compact multi-run summary", () => {
   ]);
 });
 
+test("status details include workflow progress when metadata exposes a current step", () => {
+  const lines = renderTaktDetails({
+    ...summary,
+    runs: [{
+      ...summary.runs[0],
+      workflowSteps: ["plan", "tests", "review"],
+      phase: 2,
+      currentIteration: 1,
+    }],
+  });
+
+  assert.ok(lines.some((line) => /\[[#]*>/.test(line)));
+  assert.ok(lines.some((line) => line.includes("2/3 step: tests")));
+});
+
 test("idle widget is cleared and details remain available", () => {
   const idle = { ...summary, running: 0, pending: 0, blocked: 0, failed: 0, stale: 0, runs: [] };
   assert.equal(renderTaktWidget(idle), undefined);

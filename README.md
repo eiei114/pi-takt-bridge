@@ -70,11 +70,20 @@ default, prefers a concise prompt, replaces a running bridge-owned session when
 needed, clears the old session, starts a fresh preset, submits `/go`, and
 switches to `pi-auto`. Raw output stays in the stacked Pi widget; long pastes
 show a truncated preview while `stage` is `pasting` / `sending_go`. Agents can
-also use `takt_stop` and `takt_set_mode` for recovery. `takt_read_screen` reports
+also use `takt_stop`, `takt_resume_run`, and `takt_set_mode` for recovery.
+`takt_resume_run` continues a checkpoint through TAKT's `Requeue` action with
+an explicit provider/model and does not clear or replay the task.
+`takt_read_screen` reports
 `live`, `stale`, `completed`, or `unknown` with PID, stage, and last exit when
 available. If a fresh Pi runtime is missing one of these tools or the named
 profile does not resolve to the requested cwd, the skill reports the exact
 reload/package or profile/cwd mismatch instead of guessing a path.
+
+For approval-gated execution, pass `goMode: "manual"`. The bridge submits the
+task, waits for TAKT to return to a fresh `Assistant>` prompt, and returns with
+`awaitingGo: true` without sending `/go`. After reviewing the live screen, call
+`takt_submit_go`. The explicit GO tool sends raw `/go` + Enter, avoiding
+bracketed-paste control bytes.
 
 For a new target, the skill first uses `takt_project_setup` when available. It
 creates project-local `.takt/exec/presets` and `.takt/workflows`, registers the

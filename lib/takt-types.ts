@@ -60,6 +60,8 @@ export interface TaktRunSnapshot {
   slug: string;
   task: string;
   workflow: string;
+  /** Top-level workflow step names from the run's immutable workflow bundle. */
+  workflowSteps?: string[];
   status: TaktStatus;
   sessionStatus: TaktSessionStatus;
   pid?: number;

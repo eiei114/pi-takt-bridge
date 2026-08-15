@@ -4,6 +4,8 @@ export const TAKT_EXEC_STAGES = [
   "starting",
   "waiting_prompt",
   "pasting",
+  "waiting_go",
+  "awaiting_go",
   "sending_go",
   "running",
   "stopping",
@@ -17,6 +19,7 @@ export type TaktExecStage = (typeof TAKT_EXEC_STAGES)[number];
 /** Stages where the raw PTY still shows a huge pasted prompt and looks frozen. */
 const PROMPT_OVERLAY_STAGES: ReadonlySet<TaktExecStage> = new Set([
   "pasting",
+  "waiting_go",
   "sending_go",
 ]);
 

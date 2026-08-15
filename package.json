@@ -1,6 +1,6 @@
 {
   "name": "pi-takt-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Run and monitor TAKT projects in stacked live terminal widgets inside Pi.",
   "type": "module",
   "license": "MIT",
@@ -37,8 +37,12 @@
     "ci": "npm run typecheck && npm test && npm run pack:check && npm run publish:guard"
   },
   "pi": {
-    "extensions": ["./extensions/index.ts"],
-    "skills": ["./skills"]
+    "extensions": [
+      "./extensions/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
   "publishConfig": {
     "access": "public"

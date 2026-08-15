@@ -99,6 +99,56 @@ PID, stage, and last exit so agents can tell `live` / `stale` / `completed` /
 paste stages the widget shows a truncated prompt preview instead of the full
 body.
 
+`running` describes workflow activity. `ptyRunning` separately reports whether
+the bridge still owns a live interactive TAKT terminal. A completed workflow
+can therefore report `status: completed`, `running: false`, and
+`ptyRunning: true` until that reusable terminal exits or is stopped; this does
+not mean the workflow is still executing.
+
+To continue a checkpoint without resubmitting the task, call
+`takt_resume_run` after the owned PTY has stopped:
+
+```json
+{
+  "profile": "dtm-cursor",
+  "provider": "pi",
+  "model": "cursor/composer-2.5-fast"
+}
+```
+
+The bridge runs `takt --provider pi --model cursor/composer-2.5-fast resume`,
+waits for TAKT's `Requeue` menu, and selects it with a literal Enter. It does
+not run `takt clear` or paste the original task again. `takt_stop` also accepts
+`forceObserved: true` to close stale/ownerless `running` metadata while
+preserving unknown fields such as TAKT's checkpoint data. It never kills an
+external live PID.
+
+For custom Pi providers, configure required Pi extensions in the project's
+`.takt/config.yaml` under `provider_options.pi.extensions`. TAKT 0.58 does not
+reliably carry actor-local `provider_options` from an exec preset into the
+generated immutable workflow, so the project-level setting is the stable
+route for models such as `cursor/composer-2.5-fast`.
+
+## Manual GO mode
+
+Use manual mode when task clarification should never start execution
+automatically:
+
+```json
+{
+  "profile": "dtm-cursor",
+  "prompt": "<task body>",
+  "goMode": "manual",
+  "replace": true
+}
+```
+
+The bridge waits for the assistant's clarification response and a fresh
+`Assistant>` prompt, then returns `sentGo: false` and `awaitingGo: true`.
+Nothing sends `/go` until `takt_submit_go` is called. Legacy `sendGo: false`
+selects the same manual behavior. Auto and explicit GO both send raw `/go` plus
+Enter; bracketed paste remains reserved for multiline task bodies.
+
 Force the skill with `/skill:takt-pi-runner <task body>`. If the bridge tool or
 profile is unavailable, or the named profile resolves to a different cwd, the
 skill stops with the exact reload/package or profile/cwd mismatch; it never uses
@@ -158,12 +208,21 @@ space. While a bridge-owned PTY is active, the widget also performs a lightweigh
 100 ms repaint fallback so in-place TAKT output remains visible if host-side
 screen events are coalesced.
 
-External status cards use the latest pending/run activity timestamp. Running
-work remains visible; pending, blocked, failed, and stale observations are
-hidden after 30 minutes without activity. This is presentation cleanup only:
-the bridge does not delete `.takt/tasks.yaml` entries or run history, so a
+The background project-stack refresh reads persistent `.takt/runs` metadata and
+does not invoke `takt list`. Running work remains visible; pending, blocked,
+failed, and stale run observations are hidden after 30 minutes without
+activity. Queue reconciliation is an on-demand diagnostic operation, so
+`/takt:status` and explicit task lifecycle operations may show queue counts
+that are not present on a run-only external card. This is presentation cleanup
+only: the bridge does not delete `.takt/tasks.yaml` entries or run history, so a
 pending task can still be inspected and deliberately removed with TAKT's own
 task-management flow.
+
+When a running run has a workflow bundle, each project card shows its current
+step and phase as a compact monospace bar, for example
+`flow default [##########>---------] 2/3 step: implement · p1/3 execute`.
+Before run metadata is available, the bar tracks bridge stages such as
+`waiting prompt` and `sending go` instead.
 
 In the default `pi` mode the widget does not capture keyboard focus. Use
 `/takt:send` for explicit interactive input, `/takt:mode takt` for direct PTY
@@ -175,11 +234,16 @@ active counts, the stack keeps only the current project as a compact
 `preparing` card. Use `/takt:status` or `takt_read_screen` for final diagnostics.
 
 `/takt:status` remains available as an optional diagnostic overlay. It is not
-the execution view and is not polled into the live output widget.
+the execution view and is not polled into the live output widget. It is the
+explicit path that reconciles `.takt/runs` with `takt list`; a malformed task
+queue therefore produces one actionable diagnostic error instead of a
+repeating background warning. Unexpected background refresh failures follow
+the same policy: one warning, then an inline `xN` count for the same error;
+successful refresh resets the counter.
 
-The `running`, `pending`, `blocked`, `failed`, and `completed` counts are
-reconciled from both sources. A running metadata record is `live` only when a
-matching metadata/task record exposes a live owner PID; a dead PID is `stale`,
-and a missing PID is `unknown`. `completed` and `stale` observations do not block the
-next bridge-owned exec; `live` and unresolved `unknown` sessions remain protected
-from duplicate starts.
+The diagnostic overlay's `running`, `pending`, `blocked`, `failed`, and
+`completed` counts are reconciled from both sources. A running metadata record
+is `live` only when a matching metadata/task record exposes a live owner PID; a
+dead PID is `stale`, and a missing PID is `unknown`. `completed` and `stale`
+observations do not block the next bridge-owned exec; `live` and unresolved
+`unknown` sessions remain protected from duplicate starts.

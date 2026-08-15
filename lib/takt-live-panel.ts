@@ -13,10 +13,12 @@ import {
   formatTaktInputModeLine,
   type TaktInputMode,
 } from "./takt-input-mode.ts";
+import { renderTaktWorkflowProgress } from "./takt-progress.ts";
 import {
   formatTaktLastExit,
   hasRecentTaktSummaryActivity,
   hasTaktSummaryActivity,
+  type TaktRunSnapshot,
   type TaktSummary,
 } from "./takt-types.ts";
 
@@ -186,16 +188,27 @@ export function renderTaktProjectStack(
 
   for (const project of visibleProjects) {
     const runner = project.runner;
+    const progress = renderTaktWorkflowProgress({
+      run: findActiveRun(project.summary),
+      bridgeStage: project.stage,
+      width: columns,
+    });
     const panel = [projectHeader(project)];
     if (shouldOverlayPromptPreview(project.stage) && project.promptPreview) {
-      panel.push(...renderPromptOverlay(project));
+      panel.push(...renderPromptOverlay(project, progress));
     } else if (isPreparingProject(project)) {
-      panel.push("preparing for TAKT activity...");
+      panel.push(progress ?? "preparing for TAKT activity...");
     } else if (runner?.terminal) {
       runner.resize(columns, terminalRows());
-      panel.push(...visibleWidgetLines(renderTaktTerminal(runner.terminal), MAX_PROJECT_ROWS - 1));
+      if (progress) {
+        panel.push(progress);
+      }
+      panel.push(...visibleWidgetLines(
+        renderTaktTerminal(runner.terminal),
+        Math.max(1, MAX_PROJECT_ROWS - panel.length),
+      ));
     } else if (project.summary) {
-      panel.push(...renderObservedProject(project.summary));
+      panel.push(...renderObservedProject(project.summary, columns));
     } else {
       panel.push("waiting for TAKT activity...");
     }
@@ -269,20 +282,27 @@ function isPreparingProject(project: TaktProjectWidgetEntry): boolean {
   return Boolean(project.isCurrent && project.runner?.isRunning && !hasTaktSummaryActivity(project.summary));
 }
 
-function renderPromptOverlay(project: TaktProjectWidgetEntry): string[] {
+function renderPromptOverlay(project: TaktProjectWidgetEntry, progress?: string): string[] {
   const preview = project.promptPreview?.trim() || "(prompt body omitted)";
   return [
-    `stage: ${formatTaktExecStage(project.stage ?? "pasting")}`,
+    progress ?? `stage: ${formatTaktExecStage(project.stage ?? "pasting")}`,
     "prompt preview:",
     ...preview.split("\n").slice(0, MAX_PROJECT_ROWS - 3),
   ];
 }
 
-function renderObservedProject(summary: TaktSummary): string[] {
+function renderObservedProject(summary: TaktSummary, width = DEFAULT_COLUMNS): string[] {
   const lines = [
     `status: ${summary.status}`,
     `counts: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked · ${summary.failed} failed · ${summary.stale} stale`,
   ];
+  const progress = renderTaktWorkflowProgress({
+    run: findActiveRun(summary),
+    width,
+  });
+  if (progress) {
+    lines.push(progress);
+  }
   if (summary.pid !== undefined) {
     lines.push(`pid: ${summary.pid}`);
   }
@@ -298,6 +318,13 @@ function renderObservedProject(summary: TaktSummary): string[] {
   }
   lines.push("↳ external TAKT session: raw PTY screen unavailable");
   return lines.slice(0, MAX_PROJECT_ROWS - 1);
+}
+
+function findActiveRun(summary: TaktSummary | undefined): TaktRunSnapshot | undefined {
+  return summary?.runs.find((run) =>
+    run.status === "running" || run.status === "stale" ||
+    run.sessionStatus === "live" || run.sessionStatus === "stale",
+  );
 }
 
 function compareProjectActivity(left: TaktProjectWidgetEntry, right: TaktProjectWidgetEntry): number {

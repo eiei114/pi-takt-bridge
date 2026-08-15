@@ -9,7 +9,9 @@ Pi command / project path
         │
         ├── profile registry ── explicit alias → project cwd + exec preset
         │
-        ├── takt_exec_prompt tool ── reconcile → idempotent stop (owned PTY only) → wait → dispose → clear → fresh exec → prompt → `/go` → pi-auto
+        ├── takt_exec_prompt tool ── reconcile → stop → clear → exec → prompt → auto `/go` or manual `awaiting_go`
+        ├── takt_submit_go tool ── explicit raw `/go` + Enter → pi-auto
+        ├── takt_resume_run tool ── explicit provider/model → resume → Requeue → pi-auto (no clear)
         ├── takt_stop / takt_set_mode tools ── agent recovery without shell/taskkill
         │
         ├── takt_enqueue_task / takt-acp (stdio, ACP) ── enqueue confirmed task
@@ -35,6 +37,10 @@ Pi command / project path
   a diagnostic source; they are not used to replace the live terminal output.
   Status views distinguish `live`, `stale`, `completed`, and `unknown`, and
   expose the observed PID, stage, and last exit when available.
+  After an owned stop, the bridge atomically reconciles its tracked `running`
+  record to `aborted` while retaining unknown fields and checkpoint payloads.
+  Explicit forced recovery applies only to stale/unknown records, never a live
+  externally owned PID.
 - Each bridge-owned project has one PTY/xterm screen. Projects are rendered as
   a single stacked widget above the normal Pi editor, with active projects first.
   The live widget keeps a lightweight 100 ms repaint fallback while a PTY is
@@ -53,9 +59,20 @@ Pi command / project path
 - The bundled Agent Skill uses `takt_exec_prompt` for the profile-bound prompt
   submission flow; shell execution is not used as a substitute because it would
   hide the child PTY from the Pi widget.
+- Manual GO mode waits for clarification to finish and exposes
+  `awaitingGo: true`; only `takt_submit_go` may cross that approval boundary.
+  GO commands use raw terminal input rather than bracketed-paste markers.
+- Checkpoint recovery uses `takt_resume_run`, not a fresh exec. It drives the
+  public resume selection UI through the owned PTY and sends a literal Enter,
+  avoiding both task replay and bracketed-paste control sequences in the menu.
 - External project processes can be detected from `.takt` metadata, but their
   original PTY is not attachable safely. They use a status card; only
   bridge-owned projects show raw output.
+- The background project-stack refresh reads persistent `.takt/runs` metadata
+  only. The public `takt list` queue is reconciled on demand by diagnostics and
+  explicit task operations, so an invalid queue cannot fail the live widget
+  poll or spam Pi notifications. Unexpected repeated refresh failures use one
+  warning plus an `xN` status count and reset after recovery.
 - Default input mode is `pi`: input is not forwarded implicitly. `/takt:send`
   remains the explicit seam, and `/takt:stop` owns stopping bridge children.
 - Optional dual-input modes cycle with a shortcut: `pi` → `takt` (human types
@@ -65,11 +82,17 @@ Pi command / project path
   writable. Stop retries are bounded; a timeout is returned as an explicit
   bridge error instead of starting a second process.
 - Exec progress is tracked as stages and shown in tool updates, `takt_read_screen`,
-  and the widget header. Natural PTY exits reconcile the controller, retained
+  and the widget header. Once a run bundle is available, the project card also
+  renders an ASCII progress bar from the workflow's current step and phase;
+  bridge lifecycle stages provide the fallback before `meta.json` is complete.
+  Natural PTY exits reconcile the controller, retained
   screen session, stage, and last exit before another exec is allowed. For an
   interactive `takt exec`, the bridge also tracks the run slug created after
   submission and clears the live widget when that run reaches a terminal
   status; historical completed runs are not treated as the current run.
+  Diagnostics keep workflow completion separate from PTY ownership:
+  `running` becomes false at terminal run status, while `ptyRunning` may remain
+  true for TAKT's long-lived interactive process.
   When no active counts are observed during startup, only the current project
   renders a compact preparing card. During paste stages the widget overlays a
   truncated prompt preview instead of the full raw body.
