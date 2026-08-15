@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Discover persistent TAKT run metadata inside registered project worktree
+  clones, so externally started worktree tasks remain visible in the stacked
+  project widget without polling or locking the task queue.
+- Prefer an active registered project over an idle current folder when reading
+  external TAKT status through `takt_read_screen`.
 - Fix a macOS PTY race where a clean, fast TAKT exit could arrive before the
   final `/go` acknowledgement was parsed, causing a successful submission to
   be reported as failed.

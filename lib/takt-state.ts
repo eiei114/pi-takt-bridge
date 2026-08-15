@@ -200,34 +200,82 @@ export function snapshotRun(
 }
 
 export function readRunSnapshots(cwd: string, taskItems: readonly TaktTaskItem[] = []): TaktRunSnapshot[] {
-  const runsDirectory = resolve(cwd, ".takt", "runs");
-  if (!existsSync(runsDirectory)) {
-    return [];
-  }
-
-  const snapshots: TaktRunSnapshot[] = [];
-  for (const entry of readdirSync(runsDirectory, { withFileTypes: true })) {
-    if (!entry.isDirectory()) {
+  const snapshotsBySlug = new Map<string, TaktRunSnapshot>();
+  for (const runCwd of readRunWorkspaces(cwd)) {
+    const runsDirectory = resolve(runCwd, ".takt", "runs");
+    if (!existsSync(runsDirectory)) {
       continue;
     }
-    const metaPath = resolve(runsDirectory, entry.name, "meta.json");
+    let entries: Array<{ isDirectory(): boolean; name: string }>;
     try {
-      const meta = parseRunMeta(JSON.parse(readFileSync(metaPath, "utf8")));
-      if (!meta || meta.runSlug !== entry.name) {
+      entries = readdirSync(runsDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (runCwd === cwd) {
+        throw error;
+      }
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
         continue;
       }
-      const ownerPid = findOwnerPid(meta, taskItems);
-      const workflowSteps = meta.status === "running"
-        ? readWorkflowStepNames(cwd, entry.name)
-        : undefined;
-      snapshots.push(snapshotRun(meta, ownerPid, workflowSteps));
-    } catch {
-      // A run can be observed while TAKT is replacing meta.json. Ignore it
-      // for this poll and let the next refresh reconcile it.
+      const metaPath = resolve(runsDirectory, entry.name, "meta.json");
+      try {
+        const meta = parseRunMeta(JSON.parse(readFileSync(metaPath, "utf8")));
+        if (!meta || meta.runSlug !== entry.name) {
+          continue;
+        }
+        const ownerPid = findOwnerPid(meta, taskItems);
+        const workflowSteps = meta.status === "running"
+          ? readWorkflowStepNames(runCwd, entry.name)
+          : undefined;
+        const snapshot = { ...snapshotRun(meta, ownerPid, workflowSteps), workspace: runCwd };
+        const existing = snapshotsBySlug.get(entry.name);
+        if (!existing || compareRuns(snapshot, existing) < 0) {
+          snapshotsBySlug.set(entry.name, snapshot);
+        }
+      } catch {
+        // A run can be observed while TAKT is replacing meta.json. Ignore it
+        // for this poll and let the next refresh reconcile it.
+      }
     }
   }
 
-  return snapshots.sort(compareRuns);
+  return [...snapshotsBySlug.values()].sort(compareRuns);
+}
+
+function readRunWorkspaces(cwd: string): string[] {
+  const workspaces = [cwd];
+  const seen = new Set([resolve(cwd)]);
+  const cloneMetaDirectory = resolve(cwd, ".takt", "clone-meta");
+  if (!existsSync(cloneMetaDirectory)) {
+    return workspaces;
+  }
+  let entries: Array<{ isFile(): boolean; name: string }>;
+  try {
+    entries = readdirSync(cloneMetaDirectory, { withFileTypes: true });
+  } catch {
+    return workspaces;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    try {
+      const metadata: unknown = JSON.parse(readFileSync(resolve(cloneMetaDirectory, entry.name), "utf8"));
+      if (!isRecord(metadata) || !isNonEmptyString(metadata.clonePath)) {
+        continue;
+      }
+      const clonePath = resolve(metadata.clonePath);
+      if (!seen.has(clonePath) && existsSync(clonePath)) {
+        seen.add(clonePath);
+        workspaces.push(clonePath);
+      }
+    } catch {
+      // Ignore stale or partially-written clone metadata for this poll.
+    }
+  }
+  return workspaces;
 }
 
 function readWorkflowStepNames(cwd: string, runSlug: string): string[] | undefined {

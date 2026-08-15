@@ -489,6 +489,89 @@ test("project setup registers a profile and materializes a project-local preset"
   }
 });
 
+test("project setup surfaces an external run stored in a managed clone", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-project-clone-extension-"));
+  const currentProject = join(root, "current");
+  const targetProject = join(root, "target");
+  const managedClone = join(root, "managed-clone");
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  mkdirSync(currentProject);
+  mkdirSync(targetProject);
+  mkdirSync(managedClone);
+  mkdirSync(join(root, "exec", "presets"), { recursive: true });
+  mkdirSync(join(targetProject, ".takt", "clone-meta"), { recursive: true });
+  writeFileSync(join(root, "exec", "presets", "pi-docs.yaml"), "name: pi-docs\nworkers: []\n", "utf8");
+  writeFileSync(
+    join(targetProject, ".takt", "clone-meta", "external.json"),
+    JSON.stringify({ branch: "feature/demo", clonePath: managedClone }),
+    "utf8",
+  );
+  writeOwnerlessRunningMeta(managedClone, "external-clone-run", process.pid);
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "none");
+  const { tools, events } = loadExtension();
+  const context = createContext(currentProject);
+
+  try {
+    await invoke(tools, "takt_project_setup", {
+      profile: "external-project",
+      cwd: targetProject,
+      preset: "pi-docs",
+    }, context);
+
+    assert.notEqual(context.widgetUpdates.at(-1)?.widget, undefined);
+    const observed = await invoke(tools, "takt_read_screen", { rows: 4 }, context);
+    assert.equal(observed.details.cwd, targetProject);
+    assert.equal(observed.details.status, "live");
+    assert.equal(observed.details.pid, process.pid);
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
+test("forced stop reconciles stale metadata inside a managed clone", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-clone-reconcile-"));
+  const currentProject = join(root, "current");
+  const targetProject = join(root, "target");
+  const managedClone = join(root, "managed-clone");
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  mkdirSync(currentProject);
+  mkdirSync(targetProject);
+  mkdirSync(managedClone);
+  mkdirSync(join(root, "exec", "presets"), { recursive: true });
+  mkdirSync(join(targetProject, ".takt", "clone-meta"), { recursive: true });
+  writeFileSync(join(root, "exec", "presets", "pi-docs.yaml"), "name: pi-docs\nworkers: []\n", "utf8");
+  writeFileSync(
+    join(targetProject, ".takt", "clone-meta", "external.json"),
+    JSON.stringify({ branch: "feature/demo", clonePath: managedClone }),
+    "utf8",
+  );
+  const metaPath = writeOwnerlessRunningMeta(managedClone, "clone-stale-run");
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "none");
+  const { tools, events } = loadExtension();
+  const context = createContext(currentProject);
+
+  try {
+    await invoke(tools, "takt_project_setup", {
+      profile: "external-project",
+      cwd: targetProject,
+      preset: "pi-docs",
+    }, context);
+    const result = await invoke(tools, "takt_stop", {
+      profile: "external-project",
+      forceObserved: true,
+    }, context);
+
+    assert.deepEqual(result.details.reconciledRuns, ["clone-stale-run"]);
+    assert.equal(JSON.parse(readFileSync(metaPath, "utf8")).status, "aborted");
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
 test("extension cleans up a failed clear before reporting the error", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-clear-failure-"));
   const project = join(root, "project");

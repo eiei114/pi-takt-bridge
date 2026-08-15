@@ -137,6 +137,75 @@ test("readRunSnapshots ignores partial metadata and preserves active-first order
   assert.deepEqual(snapshots[0].workflowSteps, ["plan", "implement", "review"]);
 });
 
+test("readRunSnapshots discovers active runs inside TAKT-managed clones", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-clone-state-"));
+  const clone = mkdtempSync(join(tmpdir(), "pi-takt-bridge-managed-clone-"));
+  const cloneMeta = join(cwd, ".takt", "clone-meta");
+  const runDirectory = join(clone, ".takt", "runs", "clone-run");
+  mkdirSync(cloneMeta, { recursive: true });
+  mkdirSync(runDirectory, { recursive: true });
+  writeFileSync(
+    join(cloneMeta, "feature.json"),
+    JSON.stringify({ branch: "feature/demo", clonePath: clone }),
+    "utf8",
+  );
+  writeFileSync(join(runDirectory, "meta.json"), JSON.stringify({
+    ...validMeta,
+    runSlug: "clone-run",
+    runRoot: runDirectory,
+    reportDirectory: join(runDirectory, "reports"),
+    contextDirectory: join(runDirectory, "context"),
+    logsDirectory: join(runDirectory, "logs"),
+    ownerPid: process.pid,
+  }), "utf8");
+
+  const snapshots = readRunSnapshots(cwd);
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].slug, "clone-run");
+  assert.equal(snapshots[0].status, "running");
+  assert.equal(snapshots[0].sessionStatus, "live");
+  assert.equal(snapshots[0].pid, process.pid);
+  assert.equal(snapshots[0].workspace, clone);
+});
+
+test("readRunSnapshots prefers an active clone run over a historical root collision", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-clone-collision-"));
+  const clone = mkdtempSync(join(tmpdir(), "pi-takt-bridge-collision-clone-"));
+  const cloneMeta = join(cwd, ".takt", "clone-meta");
+  const rootRun = join(cwd, ".takt", "runs", "shared-run");
+  const cloneRun = join(clone, ".takt", "runs", "shared-run");
+  mkdirSync(cloneMeta, { recursive: true });
+  mkdirSync(rootRun, { recursive: true });
+  mkdirSync(cloneRun, { recursive: true });
+  writeFileSync(join(cloneMeta, "feature.json"), JSON.stringify({ clonePath: clone }), "utf8");
+  writeFileSync(join(rootRun, "meta.json"), JSON.stringify({
+    ...validMeta,
+    runSlug: "shared-run",
+    runRoot: rootRun,
+    reportDirectory: join(rootRun, "reports"),
+    contextDirectory: join(rootRun, "context"),
+    logsDirectory: join(rootRun, "logs"),
+    status: "completed",
+    endTime: "2026-08-13T00:02:00.000Z",
+  }), "utf8");
+  writeFileSync(join(cloneRun, "meta.json"), JSON.stringify({
+    ...validMeta,
+    runSlug: "shared-run",
+    runRoot: cloneRun,
+    reportDirectory: join(cloneRun, "reports"),
+    contextDirectory: join(cloneRun, "context"),
+    logsDirectory: join(cloneRun, "logs"),
+    ownerPid: process.pid,
+  }), "utf8");
+
+  const snapshots = readRunSnapshots(cwd);
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0].status, "running");
+  assert.equal(snapshots[0].workspace, clone);
+});
+
 test("reconcileRunAsAborted atomically closes running metadata and preserves checkpoints", () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-reconcile-"));
   const runDirectory = join(cwd, ".takt", "runs", "checkpointed");

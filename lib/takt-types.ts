@@ -58,6 +58,8 @@ export interface TaktRunMeta {
 
 export interface TaktRunSnapshot {
   slug: string;
+  /** Workspace that owns this run's persistent metadata. */
+  workspace?: string;
   task: string;
   workflow: string;
   /** Top-level workflow step names from the run's immutable workflow bundle. */

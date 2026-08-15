@@ -1058,11 +1058,12 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
 
     const ownedPid = project.runner.pid;
-    const trackedRunSlug = project.execTracking
-      ? findTrackedExecRun(project.summary, project.execTracking)?.slug ?? project.execTracking.runSlug
+    const trackedRun = project.execTracking
+      ? findTrackedExecRun(project.summary, project.execTracking)
       : project.summary?.runs.find((run) =>
         ownedPid !== undefined && run.pid === ownedPid && run.status === "running"
-      )?.slug;
+      );
+    const trackedRunSlug = trackedRun?.slug ?? project.execTracking?.runSlug;
     this.setProjectStage(project, "stopping");
     try {
       await project.runner.stop();
@@ -1074,7 +1075,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       throw new Error(`TAKT stop failed for ${project.label}: ${errorMessage(error)}`);
     }
     const reconciledRuns = trackedRunSlug && reconcileRunAsAborted(
-      project.cwd,
+      trackedRun?.workspace ?? project.cwd,
       trackedRunSlug,
       "Stopped by Pi TAKT Bridge operator request; checkpoint data preserved.",
     ).reconciled
@@ -1098,7 +1099,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       run.status === "stale" || (run.status === "running" && run.sessionStatus === "unknown")
     ) ?? [];
     return candidates.flatMap((run) => reconcileRunAsAborted(
-      project.cwd,
+      run.workspace ?? project.cwd,
       run.slug,
       "Force-reconciled stale TAKT metadata by Pi TAKT Bridge; checkpoint data preserved.",
     ).reconciled ? [run.slug] : []);
@@ -1629,10 +1630,12 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
 
   private activeObservedProject(): ManagedProject | undefined {
     const current = this.context ? this.projects.get(projectPathKey(this.context.cwd)) : undefined;
-    if (current?.summary) {
+    if (hasRecentTaktSummaryActivity(current?.summary)) {
       return current;
     }
-    return [...this.projects.values()].find((project) => project.summary !== undefined);
+    return [...this.projects.values()].find((project) => hasRecentTaktSummaryActivity(project.summary))
+      ?? current
+      ?? [...this.projects.values()].find((project) => project.summary !== undefined);
   }
 
   private handleTaktFocusInput(data: string): { consume: boolean } {
