@@ -2,8 +2,19 @@
 
 ## 0.1.0 - Unreleased
 
+- Hide quiet external pending/blocked/failed/stale cards after 30 minutes and
+  show all queue counts, without deleting TAKT task or run data.
+- Add `takt_enqueue_task` and the `takt-pi-task-planner` Skill for a confirmed
+  Pi-side planning → ACP queue flow that does not start execution.
+- Add `takt-pi-orchestrator` as the TAKT front door for intake, setup, and
+  routing to the planner or runner Skills.
 - Clear the stacked live widget when a bridge-owned TAKT process exits or is
   stopped; final lifecycle diagnostics remain available through status tools.
+- Clear the live widget when a bridge-tracked interactive exec run completes
+  before its long-lived `takt exec` prompt process exits; ignore historical
+completed runs and PTY silence as completion signals.
+- Show only the current project as a compact preparing card when startup has
+  no active TAKT counts, instead of retaining multiple idle project panels.
 - Add `takt_project_setup` and `/takt:project:init` to create project-local
   `.takt` scaffolding, copy one selected global exec preset without copying
   runtime state, and register a reusable project profile idempotently.

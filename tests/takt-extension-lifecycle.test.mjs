@@ -169,6 +169,25 @@ function logLines(path) {
   return readFileSync(path, "utf8").trim().split("\n").filter(Boolean);
 }
 
+function writeCompletedRunMeta(project, slug = "completed-run", timestamp = new Date()) {
+  const runRoot = join(project, ".takt", "runs", slug);
+  const now = timestamp.toISOString();
+  mkdirSync(runRoot, { recursive: true });
+  writeFileSync(join(runRoot, "meta.json"), JSON.stringify({
+    task: "completed workflow",
+    workflow: "exec-test",
+    runSlug: slug,
+    runRoot,
+    reportDirectory: join(runRoot, "reports"),
+    contextDirectory: join(runRoot, "context"),
+    logsDirectory: join(runRoot, "logs"),
+    status: "completed",
+    startTime: now,
+    endTime: now,
+    updatedAt: now,
+  }), "utf8");
+}
+
 test("extension replaces owned exec and starts again after natural exit", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-extension-"));
   const project = join(root, "project");
@@ -204,6 +223,7 @@ test("extension replaces owned exec and starts again after natural exit", async 
     assert.equal(completed.stage, "completed");
     assert.equal(completed.lastExit.code, 0);
     assert.equal(typeof completed.pid, "number");
+    assert.equal(context.widgetUpdates.at(-1)?.widget, undefined);
 
     const third = await invoke(tools, "takt_exec_prompt", {
       profile: "pi-docs",
@@ -253,6 +273,38 @@ test("stopping a bridge-owned PTY clears the live widget", async () => {
     const result = await invoke(tools, "takt_stop", { profile: "pi-docs" }, context);
     assert.equal(result.details.stopped, true);
     assert.equal(context.widgetUpdates.at(-1)?.widget, undefined);
+  } finally {
+    await events.get("session_shutdown")?.({ reason: "quit" }, context);
+    restoreEnvironment();
+  }
+});
+
+test("completed exec workflow clears the widget before interactive PTY exit", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-takt-bridge-completed-widget-"));
+  const project = join(root, "project");
+  mkdirSync(project);
+  const logPath = join(root, "events.log");
+  const command = createTaktCommand(root);
+  writeProfile(root, project);
+  const restoreEnvironment = configureEnvironment(root, command, logPath, "none");
+  const { tools, events } = loadExtension();
+  const context = createContext(project);
+
+  try {
+    writeCompletedRunMeta(project, "historical-run", new Date(Date.now() - 60_000));
+    await invoke(tools, "takt_exec_prompt", {
+      profile: "pi-docs",
+      prompt: "workflow that completes while exec waits",
+      clear: false,
+      preset: "first",
+    }, context);
+    assert.ok(context.widgetUpdates.some((update) => update.widget !== undefined));
+
+    await new Promise((resolve) => setTimeout(resolve, 2_200));
+    assert.notEqual(context.widgetUpdates.at(-1)?.widget, undefined);
+
+    writeCompletedRunMeta(project);
+    await waitFor(() => context.widgetUpdates.at(-1)?.widget === undefined);
   } finally {
     await events.get("session_shutdown")?.({ reason: "quit" }, context);
     restoreEnvironment();

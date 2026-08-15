@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { matchesKey, Key, Text } from "@earendil-works/pi-tui";
-import { TaktAcpClient } from "../lib/takt-acp-client.ts";
+import { TaktAcpClient, type TaktEnqueueResult } from "../lib/takt-acp-client.ts";
 import {
   cycleTaktInputMode,
   describeTaktInputMode,
@@ -45,7 +45,13 @@ import {
   type TaktProjectSetupResult,
 } from "../lib/takt-project-setup.ts";
 import { readTaktSummary } from "../lib/takt-state.ts";
-import { formatTaktLastExit, type TaktLastExit, type TaktSessionStatus, type TaktSummary } from "../lib/takt-types.ts";
+import {
+  formatTaktLastExit,
+  hasRecentTaktSummaryActivity,
+  type TaktLastExit,
+  type TaktSessionStatus,
+  type TaktSummary,
+} from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
 
 const WIDGET_KEY = "pi-takt-bridge-projects";
@@ -85,6 +91,13 @@ const TAKT_STOP_PARAMETERS = Type.Object({
   })),
 });
 
+const TAKT_ENQUEUE_TASK_PARAMETERS = Type.Object({
+  profile: Type.Optional(Type.String({
+    description: "Named TAKT profile or exact project path; defaults to pi-docs",
+  })),
+  task: Type.String({ description: "Exact ready-to-run task body to queue; this does not start execution" }),
+});
+
 const TAKT_PROJECT_SETUP_PARAMETERS = Type.Object({
   profile: Type.Optional(Type.String({
     description: "Named profile; defaults to a safe slug from the target folder name",
@@ -121,6 +134,7 @@ const TAKT_READ_SCREEN_PARAMETERS = Type.Object({
 });
 
 type TaktBridgeStatus = Pick<TaktSummary, "status"> & Partial<Pick<TaktSummary, "pid" | "stage" | "lastExit">>;
+type TaktBridgeEnqueueResult = TaktEnqueueResult & { project: string; cwd: string };
 
 async function showStatus(
   ctx: ExtensionContext,
@@ -166,6 +180,13 @@ interface ManagedProject {
   summary?: TaktSummary;
   stage: TaktExecStage;
   promptPreview?: string;
+  execTracking?: TaktExecTracking;
+}
+
+interface TaktExecTracking {
+  startedAt: number;
+  baselineRunSlugs: Set<string>;
+  runSlug?: string;
 }
 
 class TaktBridgeRuntime implements TaktProjectStackSource {
@@ -186,10 +207,12 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   getProjects(): readonly TaktProjectWidgetEntry[] {
+    const currentProjectId = this.context ? projectPathKey(this.context.cwd) : undefined;
     return [...this.projects.values()].map((project) => ({
       id: project.id,
       label: project.label,
       cwd: project.cwd,
+      isCurrent: project.id === currentProjectId,
       runner: project.runner,
       summary: project.summary,
       stage: project.stage,
@@ -271,24 +294,69 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     this.initialized = true;
   }
 
-  async enqueueTask(task: string, args = ""): Promise<void> {
+  async enqueueTask(
+    task: string,
+    args = "",
+    options: { throwOnError?: boolean } = {},
+  ): Promise<TaktBridgeEnqueueResult | undefined> {
     const context = this.context;
     if (!context?.hasUI) {
-      return;
+      return undefined;
     }
 
     const project = args.trim()
       ? await this.selectProject(args, "Enqueue TAKT task in", () => true)
       : this.currentProject();
     if (!project) {
-      return;
+      return undefined;
+    }
+    return this.enqueueTaskInProject(project, task, options);
+  }
+
+  async enqueueProfileTask(
+    profileName: string,
+    task: string,
+  ): Promise<TaktBridgeEnqueueResult> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      throw new Error("TAKT bridge requires an interactive Pi UI");
+    }
+    const profile = this.profiles.get(normalizeProfileName(profileName));
+    if (!profile) {
+      throw new Error(`TAKT profile not found: ${profileName}. Use takt_project_setup first.`);
+    }
+    const project = this.ensureProject(profile.cwd);
+    await this.refreshProject(project);
+    const result = await this.enqueueTaskInProject(project, task, { throwOnError: true });
+    if (!result) {
+      throw new Error(`TAKT task could not be queued in ${project.label}`);
+    }
+    return result;
+  }
+
+  private async enqueueTaskInProject(
+    project: ManagedProject,
+    task: string,
+    options: { throwOnError?: boolean } = {},
+  ): Promise<TaktBridgeEnqueueResult | undefined> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return undefined;
     }
     try {
-      await project.acp.enqueue(task);
+      if (!task.trim()) {
+        throw new Error("TAKT task must not be empty");
+      }
+      const result = await project.acp.enqueue(task);
       context.ui.notify(`TAKT task queued for ${project.label} (worktree run).`, "info");
       await this.refreshProject(project);
+      return { project: project.label, cwd: project.cwd, ...result };
     } catch (error) {
       context.ui.notify(`TAKT enqueue failed: ${errorMessage(error)}`, "error");
+      if (options.throwOnError) {
+        throw error;
+      }
+      return undefined;
     }
   }
 
@@ -443,6 +511,10 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     const text = await context.ui.editor(`Input for ${project.label}`, "");
     if (text === undefined || !text.trim()) {
       return;
+    }
+    if (containsTaktGoCommand(text)) {
+      this.beginExecTracking(project);
+      this.setProjectStage(project, "running");
     }
     project.runner.write(formatTaktPastedInput(text));
     context.ui.notify(`Input sent to TAKT ${project.label}.`, "info");
@@ -645,6 +717,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         throwIfAborted(signal);
       }
 
+      this.beginExecTracking(project);
       this.setProjectStage(project, "starting", onUpdate, `Starting takt exec ${preset} in ${project.label}…`);
       await project.runner.start(["exec", preset]);
       await this.showLive(false);
@@ -1018,7 +1091,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       onUpdate?.(message);
     }
     this.notifyProjects();
-    if (stage === "stopped" || stage === "completed") {
+    if (stage === "stopped" || stage === "completed" || stage === "failed") {
       void this.showLive(false);
     }
   }
@@ -1078,16 +1151,21 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         if (!project || !context?.hasUI) {
           return;
         }
-        if (project.stage !== "stopping" && project.stage !== "failed" && project.stage !== "stopped") {
-          project.stage = code === 0 ? "completed" : "failed";
-          project.promptPreview = undefined;
+        if (
+          project.stage !== "stopping" &&
+          project.stage !== "failed" &&
+          project.stage !== "stopped" &&
+          project.stage !== "completed"
+        ) {
+          this.setProjectStage(project, code === 0 ? "completed" : "failed");
+        } else {
+          this.notifyProjects();
         }
+        project.execTracking = undefined;
         const outcome = code === 0 ? "finished" : "exited with errors";
         context.ui.notify(`TAKT ${project.label} ${outcome} (exit ${code}).`, code === 0 ? "info" : "error");
         if ((this.inputMode === "takt" || this.inputMode === "pi-auto") && !this.activeRunningProject()) {
           void this.setInputMode("pi", { quiet: true });
-        } else {
-          this.notifyProjects();
         }
         void this.showLive(false);
       },
@@ -1128,6 +1206,32 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       }
     }
     project.summary = await readTaktSummary(project.cwd);
+    this.reconcileExecCompletion(project);
+  }
+
+  private beginExecTracking(project: ManagedProject): void {
+    project.execTracking = {
+      startedAt: Date.now(),
+      baselineRunSlugs: new Set(project.summary?.runs.map((run) => run.slug) ?? []),
+    };
+  }
+
+  private reconcileExecCompletion(project: ManagedProject): void {
+    const tracking = project.execTracking;
+    if (!tracking || project.stage !== "running" || !project.runner.isRunning) {
+      return;
+    }
+
+    const run = findTrackedExecRun(project.summary, tracking);
+    if (!run || !isTerminalRunStatus(run.status)) {
+      return;
+    }
+
+    project.execTracking = undefined;
+    this.setProjectStage(project, run.status === "completed" ? "completed" : "failed");
+    if (this.inputMode !== "pi") {
+      void this.setInputMode("pi", { quiet: true });
+    }
   }
 
   private async selectProject(
@@ -1184,9 +1288,8 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
 
   private hasDisplayableProject(): boolean {
     return [...this.projects.values()].some((project) =>
-      project.stage !== "stopped" &&
-      project.stage !== "completed" &&
-      (project.runner.hasSession || hasSummaryActivity(project.summary)),
+      !isTerminalProjectStage(project.stage) &&
+      (project.runner.isRunning || hasRecentTaktSummaryActivity(project.summary)),
     );
   }
 
@@ -1370,14 +1473,40 @@ function renderSummaryScreen(summary: TaktSummary): string[] {
   ];
 }
 
-function hasSummaryActivity(summary: TaktSummary | undefined): boolean {
-  return summary !== undefined && (
-    summary.running > 0 ||
-    summary.pending > 0 ||
-    summary.blocked > 0 ||
-    summary.failed > 0 ||
-    summary.stale > 0
-  );
+function isTerminalProjectStage(stage: TaktExecStage): boolean {
+  return stage === "stopped" || stage === "completed" || stage === "failed";
+}
+
+function containsTaktGoCommand(value: string): boolean {
+  return /^\/go(?:\s|$)/i.test(value.trim());
+}
+
+function findTrackedExecRun(
+  summary: TaktSummary | undefined,
+  tracking: TaktExecTracking,
+): TaktSummary["runs"][number] | undefined {
+  const runs = summary?.runs ?? [];
+  if (tracking.runSlug) {
+    return runs.find((run) => run.slug === tracking.runSlug);
+  }
+
+  const newRun = runs.find((run) => !tracking.baselineRunSlugs.has(run.slug));
+  const recentRun = runs.find((run) => {
+    if (tracking.baselineRunSlugs.has(run.slug) || !run.startTime) {
+      return false;
+    }
+    const startedAt = Date.parse(run.startTime);
+    return Number.isFinite(startedAt) && startedAt >= tracking.startedAt - 1_000;
+  });
+  const run = newRun ?? recentRun;
+  if (run) {
+    tracking.runSlug = run.slug;
+  }
+  return run;
+}
+
+function isTerminalRunStatus(status: TaktSummary["runs"][number]["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "aborted";
 }
 
 async function shutdownManagedProject(project: ManagedProject): Promise<void> {
@@ -1525,6 +1654,34 @@ export default function register(pi: ExtensionAPI): void {
             copied,
             warnings,
           ].filter(Boolean).join("\n"),
+        }],
+        details: result,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "takt_enqueue_task",
+    label: "TAKT Enqueue Task",
+    description: "Queue a confirmed task through TAKT ACP without starting execution.",
+    promptSnippet: "Queue a finalized task in TAKT after Pi-side planning",
+    promptGuidelines: [
+      "Call only after the task body is finalized and the user has confirmed enqueueing.",
+      "Use takt_project_setup first when the named profile or exact target project is not ready.",
+      "This tool creates a pending task only; use takt_exec_prompt or takt-pi-runner for execution.",
+      "Pass the exact task body unchanged. Do not silently shorten acceptance criteria or verification steps.",
+    ],
+    parameters: TAKT_ENQUEUE_TASK_PARAMETERS,
+    async execute(_toolCallId, params, _signal, _onUpdate, context) {
+      const activeRuntime = await getRuntime(context);
+      const result = await activeRuntime.enqueueProfileTask(
+        params.profile?.trim() || "pi-docs",
+        params.task,
+      );
+      return {
+        content: [{
+          type: "text",
+          text: `TAKT task queued: ${result.project}\n${result.cwd}\nstopReason: ${result.stopReason}`,
         }],
         details: result,
       };

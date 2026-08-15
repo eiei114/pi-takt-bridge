@@ -12,7 +12,7 @@ Pi command / project path
         ├── takt_exec_prompt tool ── reconcile → idempotent stop (owned PTY only) → wait → dispose → clear → fresh exec → prompt → `/go` → pi-auto
         ├── takt_stop / takt_set_mode tools ── agent recovery without shell/taskkill
         │
-        ├── takt-acp (stdio, ACP) ── enqueue in selected project
+        ├── takt_enqueue_task / takt-acp (stdio, ACP) ── enqueue confirmed task
         │
         └── node-pty → `takt run` / `takt exec` in selected project
                          │
@@ -24,6 +24,11 @@ Pi command / project path
 ## Boundaries
 
 - ACP is the primary protocol for enqueueing.
+- `takt_enqueue_task` is the agent-facing queue seam. It accepts a finalized
+  task body, resolves an explicit profile/project, and stops after ACP creates
+  the pending task. `takt-pi-orchestrator` is the front door that resolves
+  intent and setup before handing off to `takt-pi-task-planner` for
+  clarification or `takt-pi-runner` for execution/recovery.
 - Public TAKT CLI commands are used through a PTY so TAKT sees a real terminal
   and keeps its normal screen behavior.
 - `.takt/runs/*/meta.json` is the persistent run state source. NDJSON logs are
@@ -58,9 +63,17 @@ Pi command / project path
   bridge error instead of starting a second process.
 - Exec progress is tracked as stages and shown in tool updates, `takt_read_screen`,
   and the widget header. Natural PTY exits reconcile the controller, retained
-  screen session, stage, and last exit before another exec is allowed. During
-  paste stages the widget overlays a truncated prompt preview instead of the
-  full raw body.
+  screen session, stage, and last exit before another exec is allowed. For an
+  interactive `takt exec`, the bridge also tracks the run slug created after
+  submission and clears the live widget when that run reaches a terminal
+  status; historical completed runs are not treated as the current run.
+  When no active counts are observed during startup, only the current project
+  renders a compact preparing card. During paste stages the widget overlays a
+  truncated prompt preview instead of the full raw body.
+- External pending, blocked, failed, and stale activity keeps its latest queue
+  or run timestamp. Non-running cards disappear after 30 minutes without new
+  activity, but the bridge never mutates `.takt/tasks.yaml` or run history as
+  part of that display cleanup.
 - A run is not assumed to be singular; the summary is derived from all run
   records in the project when the optional diagnostic overlay is requested.
 

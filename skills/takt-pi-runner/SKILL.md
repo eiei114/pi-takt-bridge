@@ -1,6 +1,6 @@
 ---
 name: takt-pi-runner
-description: Execute issue and development tasks through TAKT using Pi-only agents, a named project profile, and the Pi stacked raw-output widget. Use whenever the user says to run a task with TAKT, gives a TAKT exec prompt, mentions pi-docs, asks to paste an issue into TAKT, or wants TAKT to proceed without manually typing project paths, clear, exec, and /go commands.
+description: Execute finalized issue and development tasks through TAKT using Pi-only agents, a named project profile, and the Pi stacked raw-output widget. Use after takt-pi-orchestrator routes an execution or recovery request, or when the user explicitly invokes takt-pi-runner. Do not trigger as the front door for generic TAKT requests or vague setup/planning; route those through takt-pi-orchestrator first.
 ---
 
 # TAKT Pi Runner

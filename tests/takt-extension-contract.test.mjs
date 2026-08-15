@@ -24,6 +24,7 @@ test("fresh Pi runtime publishes all TAKT control tools and replace schema", () 
   const tools = loadTools();
 
   assert.deepEqual([...tools.keys()].sort(), [
+    "takt_enqueue_task",
     "takt_exec_prompt",
     "takt_project_setup",
     "takt_read_screen",
@@ -44,6 +45,7 @@ test("fresh Pi loader exposes the executable tool schema", async () => {
   assert.equal(loaded.extensions.length, 1);
   const tools = loaded.extensions[0].tools;
   assert.deepEqual([...tools.keys()].sort(), [
+    "takt_enqueue_task",
     "takt_exec_prompt",
     "takt_project_setup",
     "takt_read_screen",
@@ -58,6 +60,10 @@ test("fresh Pi loader exposes the executable tool schema", async () => {
   const setupTool = tools.get("takt_project_setup").definition;
   assert.equal(setupTool.parameters.properties.cwd.type, "string");
   assert.equal(setupTool.parameters.properties.copyGlobalPreset.type, "boolean");
+  const enqueueTool = tools.get("takt_enqueue_task").definition;
+  assert.equal(enqueueTool.parameters.type, "object");
+  assert.ok(enqueueTool.parameters.required.includes("task"));
+  assert.equal(enqueueTool.parameters.properties.profile.type, "string");
 });
 
 test("a second fresh extension registration publishes the same tool contract", () => {

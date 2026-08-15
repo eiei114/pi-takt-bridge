@@ -13,7 +13,12 @@ import {
   formatTaktInputModeLine,
   type TaktInputMode,
 } from "./takt-input-mode.ts";
-import { formatTaktLastExit, type TaktSummary } from "./takt-types.ts";
+import {
+  formatTaktLastExit,
+  hasRecentTaktSummaryActivity,
+  hasTaktSummaryActivity,
+  type TaktSummary,
+} from "./takt-types.ts";
 
 const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 30;
@@ -33,6 +38,7 @@ export interface TaktProjectWidgetEntry {
   id: string;
   label: string;
   cwd: string;
+  isCurrent?: boolean;
   runner?: TaktLiveRunner;
   summary?: TaktSummary;
   stage?: TaktExecStage;
@@ -43,6 +49,10 @@ export interface TaktProjectStackSource {
   getProjects(): readonly TaktProjectWidgetEntry[];
   getInputMode?(): TaktInputMode;
   subscribe(listener: () => void): () => void;
+}
+
+export interface TaktProjectStackRenderOptions {
+  now?: number;
 }
 
 /** Create a non-capturing widget that keeps normal Pi visible and focused. */
@@ -145,11 +155,17 @@ export function renderTaktProjectStack(
   projects: readonly TaktProjectWidgetEntry[],
   width: number,
   inputMode: TaktInputMode = "pi",
+  options: TaktProjectStackRenderOptions = {},
 ): string[] {
   const columns = normalizeWidgetWidth(width);
-  const visibleProjects = [...projects]
-    .filter(isDisplayableProject)
+  const now = options.now ?? Date.now();
+  const displayableProjects = [...projects]
+    .filter((project) => isDisplayableProject(project, now))
     .sort(compareProjectActivity);
+  const currentIsPreparing = displayableProjects.some(isPreparingProject);
+  const visibleProjects = currentIsPreparing
+    ? displayableProjects.filter((project) => project.isCurrent)
+    : displayableProjects;
   const lines: string[] = [`input: ${formatTaktInputModeLine(inputMode)}`];
   let shownProjects = 0;
 
@@ -158,6 +174,8 @@ export function renderTaktProjectStack(
     const panel = [projectHeader(project)];
     if (shouldOverlayPromptPreview(project.stage) && project.promptPreview) {
       panel.push(...renderPromptOverlay(project));
+    } else if (isPreparingProject(project)) {
+      panel.push("preparing for TAKT activity...");
     } else if (runner?.terminal) {
       runner.resize(columns, terminalRows());
       panel.push(...visibleWidgetLines(renderTaktTerminal(runner.terminal), MAX_PROJECT_ROWS - 1));
@@ -196,15 +214,19 @@ export function renderTaktProjectStack(
  * Their diagnostics remain available through `takt_read_screen` and
  * `/takt:status`, but the terminal panel itself is an active-session view.
  */
-function isDisplayableProject(project: TaktProjectWidgetEntry): boolean {
-  if (project.stage === "stopped" || project.stage === "completed") {
+function isDisplayableProject(project: TaktProjectWidgetEntry, now: number): boolean {
+  if (isTerminalProjectStage(project.stage)) {
     return false;
   }
   return Boolean(
-    project.runner?.hasSession ||
-    hasObservedActivity(project.summary) ||
-    (project.stage !== undefined && project.stage !== "idle"),
+    project.runner?.isRunning ||
+    hasRecentTaktSummaryActivity(project.summary, now) ||
+    (!project.runner?.hasSession && project.stage !== undefined && project.stage !== "idle"),
   );
+}
+
+function isTerminalProjectStage(stage: TaktExecStage | undefined): boolean {
+  return stage === "stopped" || stage === "completed" || stage === "failed";
 }
 
 /** Keep custom widget output inside Pi's terminal-width invariant. */
@@ -215,11 +237,21 @@ export function fitTaktWidgetLines(lines: readonly string[], width: number): str
 
 function projectHeader(project: TaktProjectWidgetEntry): string {
   const runner = project.runner;
-  const state = runner?.isRunning ? "● live" : runner?.hasSession ? "■ finished" : "◌ observed";
+  const state = isPreparingProject(project) && !shouldOverlayPromptPreview(project.stage)
+    ? "◌ preparing"
+    : runner?.isRunning
+      ? "● live"
+      : runner?.hasSession
+        ? "■ finished"
+        : "◌ observed";
   const stage = project.stage && project.stage !== "idle"
     ? ` · stage:${formatTaktExecStage(project.stage)}`
     : "";
   return `TAKT [${project.label}] ${state}${stage} · ${project.cwd}`;
+}
+
+function isPreparingProject(project: TaktProjectWidgetEntry): boolean {
+  return Boolean(project.isCurrent && project.runner?.isRunning && !hasTaktSummaryActivity(project.summary));
 }
 
 function renderPromptOverlay(project: TaktProjectWidgetEntry): string[] {
@@ -234,7 +266,7 @@ function renderPromptOverlay(project: TaktProjectWidgetEntry): string[] {
 function renderObservedProject(summary: TaktSummary): string[] {
   const lines = [
     `status: ${summary.status}`,
-    `counts: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked`,
+    `counts: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked · ${summary.failed} failed · ${summary.stale} stale`,
   ];
   if (summary.pid !== undefined) {
     lines.push(`pid: ${summary.pid}`);
@@ -253,25 +285,14 @@ function renderObservedProject(summary: TaktSummary): string[] {
   return lines.slice(0, MAX_PROJECT_ROWS - 1);
 }
 
-function hasObservedActivity(summary: TaktSummary | undefined): boolean {
-  return summary !== undefined && (
-    summary.running > 0 ||
-    summary.pending > 0 ||
-    summary.blocked > 0 ||
-    summary.failed > 0 ||
-    summary.stale > 0
-  );
-}
-
 function compareProjectActivity(left: TaktProjectWidgetEntry, right: TaktProjectWidgetEntry): number {
   return projectActivityScore(right) - projectActivityScore(left) || left.label.localeCompare(right.label);
 }
 
 function projectActivityScore(project: TaktProjectWidgetEntry): number {
   if (project.runner?.isRunning) return 4;
-  if (project.runner?.hasSession) return 3;
   if (project.summary?.running) return 2;
-  if (project.summary && hasObservedActivity(project.summary)) return 1;
+  if (project.summary && hasTaktSummaryActivity(project.summary)) return 1;
   return 0;
 }
 

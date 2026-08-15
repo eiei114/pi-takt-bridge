@@ -11,6 +11,14 @@
 The bridge does not write `.takt/tasks.yaml` itself. ACP is the control
 boundary for task creation.
 
+For agent-driven work, start with the bundled `takt-pi-orchestrator` Skill. It
+asks the minimum TAKT target/intent/setup questions, then routes to
+`takt-pi-task-planner` or `takt-pi-runner`. The planner discusses the goal,
+scope, non-goals, acceptance criteria, and validation in Pi, asks for
+confirmation, then calls `takt_enqueue_task`. The tool queues the finalized
+body through ACP and does not start execution. The runner handles explicit
+execution and recovery.
+
 ## Start and stop
 
 `/takt:start` asks for confirmation, then starts `takt run` in the selected
@@ -148,12 +156,21 @@ progress updates are rendered as a screen rather than dumped as broken escape
 codes. Each panel is capped to the latest visible lines to preserve Pi's editor
 space.
 
+External status cards use the latest pending/run activity timestamp. Running
+work remains visible; pending, blocked, failed, and stale observations are
+hidden after 30 minutes without activity. This is presentation cleanup only:
+the bridge does not delete `.takt/tasks.yaml` entries or run history, so a
+pending task can still be inspected and deliberately removed with TAKT's own
+task-management flow.
+
 In the default `pi` mode the widget does not capture keyboard focus. Use
 `/takt:send` for explicit interactive input, `/takt:mode takt` for direct PTY
-focus, and `/takt:stop` to stop TAKT. When a bridge-owned child exits or is
-stopped, the live widget is cleared and Pi sends a success/error notification
-with the exit code. Use `/takt:status` or `takt_read_screen` for final
-diagnostics.
+focus, and `/takt:stop` to stop TAKT. When a bridge-owned child exits, is
+stopped, or its bridge-tracked exec run reaches a terminal status, the live
+widget is cleared. A historical completed run is not enough to clear a newly
+started session. While a bridge-owned PTY is preparing and TAKT reports no
+active counts, the stack keeps only the current project as a compact
+`preparing` card. Use `/takt:status` or `takt_read_screen` for final diagnostics.
 
 `/takt:status` remains available as an optional diagnostic overlay. It is not
 the execution view and is not polled into the live output widget.

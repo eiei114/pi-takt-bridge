@@ -89,7 +89,56 @@ test("project stack shows input mode even with no active sessions", () => {
   assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
-test("project stack hides bridge sessions after stop or natural completion", () => {
+test("project stack hides quiet observed pending activity after the inactivity TTL", () => {
+  const now = Date.parse("2026-08-14T01:00:00.000Z");
+  const project = {
+    id: "pending",
+    label: "pending",
+    cwd: "C:/pending",
+    summary: {
+      cwd: "C:/pending",
+      status: "completed",
+      running: 0,
+      pending: 1,
+      blocked: 0,
+      failed: 0,
+      completed: 0,
+      stale: 0,
+      activityAt: "2026-08-14T00:00:00.000Z",
+      runs: [],
+    },
+  };
+
+  const lines = renderTaktProjectStack([project], 80, "pi", { now });
+  assert.ok(lines.every((line) => !line.includes("[pending]")));
+  assert.ok(lines.some((line) => line.includes("no active sessions")));
+});
+
+test("project stack keeps fresh observed pending activity visible", () => {
+  const now = Date.parse("2026-08-14T01:00:00.000Z");
+  const lines = renderTaktProjectStack([{
+    id: "pending",
+    label: "pending",
+    cwd: "C:/pending",
+    summary: {
+      cwd: "C:/pending",
+      status: "completed",
+      running: 0,
+      pending: 1,
+      blocked: 0,
+      failed: 0,
+      completed: 0,
+      stale: 0,
+      activityAt: "2026-08-14T00:45:00.000Z",
+      runs: [],
+    },
+  }], 80, "pi", { now });
+
+  assert.ok(lines.some((line) => line.includes("[pending]")));
+  assert.ok(lines.some((line) => line.includes("0 running · 1 pending · 0 blocked · 0 failed · 0 stale")));
+});
+
+test("project stack hides bridge sessions after stop, failure, or natural completion", () => {
   const runner = {
     terminal: undefined,
     hasSession: true,
@@ -97,13 +146,66 @@ test("project stack hides bridge sessions after stop or natural completion", () 
     resize() {},
   };
 
-  for (const stage of ["stopped", "completed"]) {
+  for (const stage of ["stopped", "failed", "completed"]) {
     const lines = renderTaktProjectStack([
       { id: "finished", label: "finished", cwd: "C:/finished", runner, stage },
     ], 40);
     assert.ok(lines.every((line) => !line.includes("[finished]")));
     assert.ok(lines.some((line) => line.includes("no active sessions")));
   }
+});
+
+test("project stack keeps a live PTY when only a historical run is completed", () => {
+  const lines = renderTaktProjectStack([
+    {
+      id: "finished",
+      label: "finished",
+      cwd: "C:/finished",
+      runner: {
+        terminal: undefined,
+        hasSession: true,
+        isRunning: true,
+        resize() {},
+      },
+      stage: "running",
+      summary: {
+        cwd: "C:/finished",
+        status: "completed",
+        running: 0,
+        pending: 0,
+        blocked: 0,
+        failed: 0,
+        completed: 1,
+        stale: 0,
+        runs: [{
+          slug: "finished-run",
+          task: "finished task",
+          workflow: "default",
+          status: "completed",
+          sessionStatus: "completed",
+        }],
+      },
+    },
+  ], 40);
+
+  assert.ok(lines.some((line) => line.includes("[finished]")));
+});
+
+test("project stack shows only the current project while TAKT is preparing", () => {
+  const runner = {
+    terminal: undefined,
+    hasSession: true,
+    isRunning: true,
+    resize() {},
+  };
+  const lines = renderTaktProjectStack([
+    { id: "other", label: "other", cwd: "C:/other", runner },
+    { id: "current", label: "current", cwd: "C:/current", isCurrent: true, runner },
+  ], 60);
+
+  assert.ok(lines.some((line) => line.includes("[current]")));
+  assert.ok(lines.some((line) => line.includes("preparing")));
+  assert.ok(lines.every((line) => !line.includes("[other]")));
 });
 
 test("project stack overlays long prompt previews while pasting", async () => {

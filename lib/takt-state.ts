@@ -25,6 +25,7 @@ const REQUIRED_META_STRING_FIELDS = [
 ] as const;
 const OPTIONAL_META_STRING_FIELDS = ["reason", "endTime", "currentStep", "updatedAt", "stage"] as const;
 const TASK_TEXT_FIELDS = ["name", "content", "summary", "stage"] as const;
+const TASK_TIME_FIELDS = ["createdAt", "startedAt", "completedAt"] as const;
 
 export interface TaktStateOptions {
   command?: string;
@@ -138,6 +139,7 @@ export function snapshotRun(meta: TaktRunMeta, ownerPid?: number): TaktRunSnapsh
     ...(stage ? { stage } : {}),
     ...(meta.lastExit ? { lastExit: meta.lastExit } : {}),
     ...(meta.startTime ? { startTime: meta.startTime } : {}),
+    ...(meta.endTime ? { endTime: meta.endTime } : {}),
     ...(meta.updatedAt ? { updatedAt: meta.updatedAt } : {}),
     ...(meta.currentStep ? { currentStep: meta.currentStep } : {}),
     ...(meta.currentIteration !== undefined ? { currentIteration: meta.currentIteration } : {}),
@@ -190,6 +192,7 @@ export async function readTaktSummary(cwd: string, options: TaktStateOptions = {
   const pid = representativeRun?.pid ?? representativeTask?.ownerPid;
   const stage = representativeRun?.stage ?? representativeTask?.stage;
   const lastExit = representativeRun?.lastExit ?? representativeTask?.lastExit;
+  const activityAt = findLatestActivityAt(runs, taskItems);
 
   return {
     cwd,
@@ -204,6 +207,7 @@ export async function readTaktSummary(cwd: string, options: TaktStateOptions = {
     failed: queueFailed + runs.filter((run) => run.status === "failed").length,
     completed: queueCompleted + runs.filter((run) => run.status === "completed").length,
     stale: runs.filter((run) => run.status === "stale").length,
+    ...(activityAt ? { activityAt } : {}),
     ...(failedRun?.failure || failedRun?.reason ? { lastError: failedRun.failure ?? failedRun.reason } : {}),
   };
 }
@@ -351,6 +355,11 @@ function normalizeTaskItem(value: unknown): TaktTaskItem | undefined {
       item[key] = value[key];
     }
   }
+  for (const key of TASK_TIME_FIELDS) {
+    if (isNonEmptyString(value[key])) {
+      item[key] = value[key];
+    }
+  }
   const ownerPid = parsePid(value.ownerPid);
   if (ownerPid !== undefined) {
     item.ownerPid = ownerPid;
@@ -366,6 +375,29 @@ function normalizeTaskItem(value: unknown): TaktTaskItem | undefined {
     item.data = { task: value.data.task };
   }
   return item;
+}
+
+function findLatestActivityAt(
+  runs: readonly TaktRunSnapshot[],
+  taskItems: readonly TaktTaskItem[],
+): string | undefined {
+  const timestamps = [
+    ...runs
+      .filter((run) => run.status === "running" || run.status === "failed" || run.status === "stale")
+      .flatMap((run) => [run.endTime, run.updatedAt, run.startTime]),
+    ...taskItems
+      .filter((item) =>
+        item.kind === "pending" ||
+        item.kind === "running" ||
+        item.kind === "blocked" ||
+        item.kind === "failed" ||
+        item.kind === "exceeded",
+      )
+      .flatMap((item) => [item.completedAt, item.startedAt, item.createdAt]),
+  ]
+    .filter((value): value is string => value !== undefined && Number.isFinite(Date.parse(value)))
+    .sort((left, right) => Date.parse(right) - Date.parse(left));
+  return timestamps[0];
 }
 
 function parseLastExit(value: unknown): TaktLastExit | undefined {

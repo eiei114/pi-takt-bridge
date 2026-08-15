@@ -15,6 +15,7 @@ const {
   snapshotRun,
   usesWindowsShell,
 } = await import("../lib/takt-state.ts");
+const { hasRecentTaktSummaryActivity } = await import("../lib/takt-types.ts");
 
 const validMeta = {
   task: "Add the bridge",
@@ -71,7 +72,27 @@ test("snapshotRun exposes pid, stage, and last exit alongside lifecycle status",
   const snapshot = snapshotRun(meta);
   assert.equal(snapshot.sessionStatus, "completed");
   assert.equal(snapshot.stage, "running");
+  assert.equal(snapshot.endTime, undefined);
   assert.deepEqual(snapshot.lastExit, { code: 17, signal: 2 });
+});
+
+test("observed activity remains visible while fresh and hides after the inactivity TTL", () => {
+  const now = Date.parse("2026-08-14T01:00:00.000Z");
+  const summary = {
+    cwd: "/repo",
+    status: "completed",
+    running: 0,
+    pending: 1,
+    blocked: 0,
+    failed: 0,
+    completed: 0,
+    stale: 0,
+    activityAt: "2026-08-14T00:45:00.000Z",
+    runs: [],
+  };
+
+  assert.equal(hasRecentTaktSummaryActivity(summary, now, 30 * 60 * 1_000), true);
+  assert.equal(hasRecentTaktSummaryActivity(summary, now + 15 * 60 * 1_000, 30 * 60 * 1_000), false);
 });
 
 test("readRunSnapshots ignores partial metadata and preserves active-first ordering", () => {
@@ -123,6 +144,21 @@ test("readTaktSummary uses TAKT_COMMAND and preserves live task metadata", async
       process.env.TAKT_COMMAND = previousCommand;
     }
   }
+});
+
+test("readTaktSummary records pending task creation as observed activity", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-pending-age-"));
+  const command = createTaskListCommand(cwd, JSON.stringify({
+    tasks: [{
+      kind: "pending",
+      name: "old-task",
+      createdAt: "2026-08-14T00:30:00.000Z",
+    }],
+  }));
+
+  const summary = await readTaktSummary(cwd, { command });
+  assert.equal(summary.pending, 1);
+  assert.equal(summary.activityAt, "2026-08-14T00:30:00.000Z");
 });
 
 test("readTaktSummary surfaces task-list command failures", async () => {

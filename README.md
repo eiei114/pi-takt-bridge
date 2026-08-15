@@ -10,7 +10,10 @@ interface for enqueueing and runs public TAKT CLI commands inside real PTYs.
 The live widget renders TAKT's terminal screen (including in-progress output,
 ANSI control sequences, and prompts) instead of reducing bridge-owned
 execution to a status widget. It clears automatically when the bridge-owned
-process exits or is stopped; final diagnostics remain available through
+process exits or is stopped, or when the bridge-tracked exec run reaches a
+terminal status. Historical completed runs never trigger that transition;
+when counts are all zero during startup, only the current project gets a
+compact `preparing` card. Final diagnostics remain available through
 `/takt:status` and `takt_read_screen`.
 
 ## Prerequisites
@@ -52,6 +55,14 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:stop [path]` | Confirm and interrupt a TAKT process started by Pi |
 | `/takt:status` | Open the optional diagnostic state overlay |
 
+The bundled `takt-pi-orchestrator` Skill is the front door for TAKT requests. It
+asks the minimum setup/intent questions, prepares the exact project, and routes
+to `takt-pi-task-planner` or `takt-pi-runner`. The `takt_enqueue_task` agent
+tool queues a finalized task through ACP without starting execution. The
+planner uses it after a Pi-side conversation has settled goal, scope,
+non-goals, acceptance criteria, and validation; the runner remains the
+separate execution path.
+
 The bundled `takt-pi-runner` Agent Skill calls the `takt_exec_prompt` tool for
 the common issue-body → `/go` flow. Its published schema includes the `replace`
 option; the normal call passes `replace: true`. It uses the `pi-docs` profile by
@@ -86,6 +97,9 @@ screens are stacked above the normal Pi editor, with the most active project
 first. Bridge-owned PTYs show raw TAKT output. A TAKT process started in another
 terminal can be detected from its `.takt` state, but its original PTY cannot be
 attached safely; that project is shown as an external status card instead.
+External pending/blocked/failed/stale cards are hidden after 30 minutes without
+new activity. This only cleans the Pi display; it never deletes TAKT tasks or
+run history automatically.
 The bridge only stops PTYs it created, and bounded stop failures are reported
 instead of retried indefinitely.
 
