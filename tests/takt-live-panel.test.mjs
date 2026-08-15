@@ -3,7 +3,7 @@ import test from "node:test";
 
 const xterm = await import("@xterm/headless");
 const { visibleWidth } = await import("@earendil-works/pi-tui");
-const { createTaktLiveWidget, renderTaktProjectStack, renderTaktTerminal } = await import("../lib/takt-live-panel.ts");
+const { createTaktLiveWidget, createTaktProjectStackWidget, renderTaktProjectStack, renderTaktTerminal } = await import("../lib/takt-live-panel.ts");
 const Terminal = xterm.default?.Terminal ?? xterm.Terminal;
 
 test("live widget renders the PTY screen instead of raw cursor escapes", async () => {
@@ -81,6 +81,50 @@ test("project stack keeps live screens and external project status together", as
   ], 30, "pi-auto");
   assert.ok(autoLines[0]?.includes("[pi-auto]"));
   liveTerminal.dispose();
+});
+
+test("project stack keeps requesting renders while a live PTY screen changes", async () => {
+  const terminal = new Terminal({ cols: 30, rows: 8, allowProposedApi: true });
+  const runner = {
+    terminal,
+    hasSession: true,
+    isRunning: true,
+    resize() {},
+    subscribe() {
+      return () => {};
+    },
+  };
+  const source = {
+    getProjects() {
+      return [{ id: "live", label: "live", cwd: "C:/live", runner, stage: "running" }];
+    },
+    getInputMode() {
+      return "pi-auto";
+    },
+    subscribe() {
+      return () => {};
+    },
+  };
+  let renders = 0;
+  let widget;
+  const frames = [];
+  widget = createTaktProjectStackWidget(source, {
+    requestRender() {
+      renders += 1;
+      frames.push(widget.render(30));
+    },
+  });
+
+  await new Promise((resolve) => terminal.write("live output", resolve));
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.ok(renders > 0);
+  assert.ok(frames.some((frame) => frame.some((line) => line.includes("live output"))));
+
+  widget.dispose();
+  const rendersAfterDispose = renders;
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(renders, rendersAfterDispose);
+  terminal.dispose();
 });
 
 test("project stack shows input mode even with no active sessions", () => {

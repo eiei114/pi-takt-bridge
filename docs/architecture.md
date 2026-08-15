@@ -37,6 +37,9 @@ Pi command / project path
   expose the observed PID, stage, and last exit when available.
 - Each bridge-owned project has one PTY/xterm screen. Projects are rendered as
   a single stacked widget above the normal Pi editor, with active projects first.
+  The live widget keeps a lightweight 100 ms repaint fallback while a PTY is
+  active because host-side screen callbacks may be coalesced during in-place
+  terminal updates.
 - Named profiles persist an explicit alias, project cwd, and optional exec preset
   in the user config directory. The bridge does not scan arbitrary folders or
   silently guess a similarly named repository.

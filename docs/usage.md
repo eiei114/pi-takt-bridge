@@ -154,7 +154,9 @@ TAKT projects stay visible together. It uses `node-pty` plus an xterm-compatible
 headless buffer so ANSI cursor movement, clear-screen sequences, colors, and
 progress updates are rendered as a screen rather than dumped as broken escape
 codes. Each panel is capped to the latest visible lines to preserve Pi's editor
-space.
+space. While a bridge-owned PTY is active, the widget also performs a lightweight
+100 ms repaint fallback so in-place TAKT output remains visible if host-side
+screen events are coalesced.
 
 External status cards use the latest pending/run activity timestamp. Running
 work remains visible; pending, blocked, failed, and stale observations are

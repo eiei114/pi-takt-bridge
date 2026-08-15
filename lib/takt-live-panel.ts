@@ -25,6 +25,7 @@ const DEFAULT_ROWS = 30;
 const MAX_WIDGET_ROWS = 10;
 const MAX_PROJECT_ROWS = 8;
 const MAX_STACK_ROWS = 30;
+const LIVE_WIDGET_REFRESH_INTERVAL_MS = 100;
 
 export interface TaktLiveRunner {
   readonly terminal: Terminal | undefined;
@@ -121,6 +122,7 @@ class TaktProjectStackWidget implements Component {
   private readonly source: TaktProjectStackSource;
   private readonly tui: { requestRender(): void };
   private readonly unsubscribe: () => void;
+  private readonly refreshTimer: ReturnType<typeof setInterval>;
 
   constructor(
     source: TaktProjectStackSource,
@@ -132,6 +134,18 @@ class TaktProjectStackWidget implements Component {
       this.invalidate();
       this.tui.requestRender();
     });
+    // PTY output can arrive while the terminal parser is still settling, and
+    // some TAKT screens update in place without producing a source-level state
+    // change. Keep the mounted live screen fresh even when that event is
+    // coalesced or missed by the host UI.
+    this.refreshTimer = setInterval(() => {
+      if (!this.source.getProjects().some((project) => project.runner?.isRunning && project.runner.terminal)) {
+        return;
+      }
+      this.invalidate();
+      this.tui.requestRender();
+    }, LIVE_WIDGET_REFRESH_INTERVAL_MS);
+    this.refreshTimer.unref?.();
   }
 
   render(width: number): string[] {
@@ -148,6 +162,7 @@ class TaktProjectStackWidget implements Component {
 
   dispose(): void {
     this.unsubscribe();
+    clearInterval(this.refreshTimer);
   }
 }
 

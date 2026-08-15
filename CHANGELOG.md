@@ -37,6 +37,9 @@ completed runs and PTY silence as completion signals.
   `takt_read_screen`, and the stacked widget header.
 - Overlay a truncated prompt preview during `pasting` / `sending_go` so long
   issue bodies do not look like a frozen widget.
+- Keep the bridge-owned live widget repainting at a short interval while a PTY
+  is active, so in-place TAKT output remains visible even when host-side screen
+  events are coalesced.
 - Switch to `pi-auto` automatically after a successful `takt_exec_prompt`
   submit; abort/failure paths always stop the child PTY before returning.
 - Update `takt-pi-runner` Skill for replace/stop recovery and concise prompts.
