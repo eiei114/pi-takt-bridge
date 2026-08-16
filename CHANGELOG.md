@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make the TAKT Pi Orchestrator automatically bootstrap exact current or
+  explicitly targeted projects before planning, execution, and recovery,
+  carrying the returned profile forward instead of falling back to `pi-docs`,
+  and route DTM Cursor work through its Devin SWE workflow.
 - Discover persistent TAKT run metadata inside registered project worktree
   clones, so externally started worktree tasks remain visible in the stacked
   project widget without polling or locking the task queue.

@@ -111,23 +111,24 @@ To continue a checkpoint without resubmitting the task, call
 ```json
 {
   "profile": "dtm-cursor",
-  "provider": "pi",
-  "model": "cursor/composer-2.5-fast"
+  "provider": "devin",
+  "model": "swe-1-7"
 }
 ```
 
-The bridge runs `takt --provider pi --model cursor/composer-2.5-fast resume`,
-waits for TAKT's `Requeue` menu, and selects it with a literal Enter. It does
-not run `takt clear` or paste the original task again. `takt_stop` also accepts
-`forceObserved: true` to close stale/ownerless `running` metadata while
+For DTM Cursor, the bridge runs `takt --provider devin --model swe-1-7 resume`,
+waits for TAKT's `Requeue` menu, and selects it with a literal Enter.
+It does not run `takt clear` or paste the original task again. `takt_stop` also
+accepts `forceObserved: true` to close stale/ownerless `running` metadata while
 preserving unknown fields such as TAKT's checkpoint data. It never kills an
 external live PID.
 
-For custom Pi providers, configure required Pi extensions in the project's
-`.takt/config.yaml` under `provider_options.pi.extensions`. TAKT 0.58 does not
-reliably carry actor-local `provider_options` from an exec preset into the
-generated immutable workflow, so the project-level setting is the stable
-route for models such as `cursor/composer-2.5-fast`.
+For non-DTM projects using a custom Pi provider, configure required Pi
+extensions in the project's `.takt/config.yaml` under
+`provider_options.pi.extensions`. TAKT 0.58 does not reliably carry
+actor-local `provider_options` from an exec preset into the generated immutable
+workflow, so the project-level setting is the stable route for models such as
+`cursor/composer-2.5-fast`.
 
 ## Manual GO mode
 

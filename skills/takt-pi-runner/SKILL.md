@@ -42,14 +42,15 @@ manual registration or when the setup tool is unavailable.
    scope (files to change, must/must-not, verification). The widget already
    truncates long pasted bodies during `pasting` / `sending_go`.
 2. If the target profile/project is not ready, call `takt_project_setup` first.
-3. Use the named profile `pi-docs` unless the user explicitly names another
-   profile.
+3. Use the profile returned by `takt_project_setup` unchanged. Use the named
+   profile `pi-docs` only when the target was already explicitly registered as
+   `pi-docs`; never replace a setup-derived profile with `pi-docs`.
 4. Call `takt_read_screen` first when a session may already be running.
 5. Call `takt_exec_prompt` with:
 
    ```json
    {
-     "profile": "pi-docs",
+     "profile": "<resolved profile>",
      "prompt": "<concise task body>",
      "clear": true,
      "sendGo": true,
@@ -66,6 +67,23 @@ manual registration or when the setup tool is unavailable.
    submit switches input mode to `pi-auto` automatically. TAKT's raw live screen
    remains in the Pi project stack; do not start a second TAKT process or claim
    that the task is complete.
+
+## Project workflow overrides
+
+The orchestrator may provide a project-owned workflow directive. Preserve it
+verbatim in the task body and do not replace it with the default Pi lane.
+
+For DTM Cursor (`dtm-cursor`), verify the target's
+`.takt/workflows/dtm-cursor-devin-swe.yaml` declares `provider: devin` and
+`model: swe-1-7`, then keep this standalone line in the prompt:
+
+```text
+workflow: dtm-cursor-devin-swe
+```
+
+For DTM checkpoint recovery, call `takt_resume_run` with `provider: "devin"`
+and `model: "swe-1-7"`. If the project-owned workflow is missing or conflicts,
+stop and report the exact mismatch; never fall back to Pi/OpenAI/Cursor.
 
 ## Recovery
 
