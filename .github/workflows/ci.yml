@@ -30,4 +30,6 @@ jobs:
           cache: npm
       - uses: oven-sh/setup-bun@v2
       - run: npm ci
+      # node-pty ships spawn-helper as 0644; without +x, macOS fails with posix_spawnp.
+      - run: node scripts/ensure-node-pty-helpers.mjs
       - run: npm run ci

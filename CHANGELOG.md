@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix macOS CI/`node-pty` startups that failed with `posix_spawnp failed`
+  because the published `spawn-helper` binaries are mode `0644`; chmod them
+  `0755` via root `postinstall` and an explicit CI step.
 - Teach the TAKT Pi skills to ask once when a project has multiple matching
   workflows and the lane is still ambiguous (for example DTM Cursor
   `plan-verify` vs `plan-verify-grok`), while keeping explicit user/lane
