@@ -83,6 +83,9 @@ For DTM Cursor (`dtm-cursor`):
 - Perf diagnosis: `workflow: dtm-cursor-perf-investigate` (`perf` / `perf-investigate`);
   after the diagnosis report, continue with `implement` rather than mixing
   production optimizations into the perf lane.
+- Local design options: `workflow: dtm-cursor-design-optimize` (`design` /
+  `design-optimize`); after the options report, continue with `implement`
+  (or a short `audit` first if the report says so).
 - Resume and recovery use the project's configured Pi provider/workflow.
 
 ## Recovery

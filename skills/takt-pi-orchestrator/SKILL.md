@@ -86,9 +86,11 @@ When the user names **DTM Cursor**, or the resolved target folder basename is
    `dtm-cursor-implement` for feature work (`implement` → builtin
    `development-core` + project knowledge `dtm-boundary`),
    `dtm-cursor-bug-investigate` for bug diagnosis (`bug` / `bug-investigate`
-   → handoff to `implement`), or
+   → handoff to `implement`),
    `dtm-cursor-perf-investigate` for perf diagnosis (`perf` / `perf-investigate`
-   → handoff to `implement`).
+   → handoff to `implement`), or
+   `dtm-cursor-design-optimize` for local redesign options (`design` /
+   `design-optimize` → handoff to `implement`, or short `audit` if needed).
 2. Preserve the project's existing `.takt/config.yaml` and custom workflow
    files. Bootstrap may add missing bridge scaffolding.
 3. Resume and recovery use the project's configured Pi provider/workflow.
@@ -143,8 +145,9 @@ limitation instead of claiming that a PR will appear.
 - Preserve Pi-only/provider/worktree constraints exactly; do not invent them.
 - For DTM Cursor, route `audit`/`normal` → `dtm-cursor-plan-verify`,
   `implement` → `dtm-cursor-implement`, `bug`/`bug-investigate` →
-  `dtm-cursor-bug-investigate`, and `perf`/`perf-investigate` →
-  `dtm-cursor-perf-investigate` as documented in the project.
+  `dtm-cursor-bug-investigate`, `perf`/`perf-investigate` →
+  `dtm-cursor-perf-investigate`, and `design`/`design-optimize` →
+  `dtm-cursor-design-optimize` as documented in the project.
 - Carry the profile returned by setup into the next skill; never fall back to a
   guessed profile after setup succeeds.
 - Keep the handoff seamless. Briefly state the next step in human terms
