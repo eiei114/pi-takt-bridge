@@ -257,3 +257,8 @@ absolute paths with `TAKT_COMMAND=/opt/homebrew/bin/takt` and
 `TAKT_ACP_COMMAND=/opt/homebrew/bin/takt-acp` (adjust for Intel Homebrew or a
 custom install). If `node-pty` has no matching native prebuild, install Xcode
 Command Line Tools with `xcode-select --install`.
+
+After `npm ci` / `npm install`, this package runs
+`scripts/ensure-node-pty-helpers.mjs` so `node-pty`'s `spawn-helper` binaries
+are executable. Without that chmod, macOS can fail PTY spawn with
+`posix_spawnp failed` because the published helpers are mode `0644`.

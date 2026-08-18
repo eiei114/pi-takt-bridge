@@ -22,7 +22,9 @@ compact `preparing` card. Final diagnostics remain available through
 - TAKT 0.58 or later installed as the `takt` and `takt-acp` commands
 - A configured TAKT provider/model
 - On macOS, `node-pty` may need Xcode Command Line Tools when a matching
-  native prebuild is unavailable (`xcode-select --install`).
+  native prebuild is unavailable (`xcode-select --install`). Fresh installs
+  also need executable `spawn-helper` bits; this package chmods them in
+  `postinstall` (otherwise macOS can fail with `posix_spawnp failed`).
 
 ## Install
 

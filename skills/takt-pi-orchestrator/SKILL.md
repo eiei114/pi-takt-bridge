@@ -24,7 +24,9 @@ the current Pi project, an explicit path, or a named profile:
 3. **Execution policy** — preset/profile, Pi-only provider constraint, worktree
    expectation, workflow/provider lane, and whether external side effects are
    allowed. A project-specific workflow is an explicit user/project
-   constraint, not a reason to substitute the global Pi default.
+   constraint, not a reason to substitute the global Pi default. When the
+   workflow/lane is still ambiguous after target resolution, follow
+   **Workflow selection** below before planning or execution.
 4. **Task contract** — goal, scope, non-goals, acceptance criteria, and
    validation evidence when the request is implementation work.
 
@@ -77,12 +79,44 @@ external `stale`/`unknown` metadata. External runs can be observed but their
 original PTY must not be killed or claimed. Route ownerless checkpoint recovery
 to `takt-pi-runner`; do not start a duplicate run.
 
+## Workflow selection
+
+Resolve the project workflow **before** handing off to the planner or runner.
+Bootstrap must not invent or rewrite workflow files; this step only chooses
+among workflows that already exist under the target's `.takt/workflows/`.
+
+1. After target + bootstrap, list project workflow YAML basenames
+   (stem without `.yaml`) under `<cwd>/.takt/workflows/`. Ignore empty dirs.
+2. **Do not ask** when any of these already pin one workflow:
+   - user named an exact workflow id (`workflow: …`) or lane alias
+   - intent maps to exactly one matching project workflow
+   - recovery/resume of an existing session (keep that run's workflow)
+3. **Ask once** with `ask_user_question` / `cursor_ask_question` when the lane
+   is still ambiguous, for example:
+   - intent class has **two or more** candidates (e.g. `dtm-cursor-plan-verify`
+     vs `dtm-cursor-plan-verify-grok` for audit)
+   - user said “run TAKT” / “このプロジェクトで” without a lane, and the project
+     has multiple workflows
+   - intent could fit more than one lane (audit vs implement vs bug, etc.)
+4. Build options from the real files: label = workflow id, short description
+   from the YAML `description:` when present. Prefer project lane docs /
+   `scripts/takt-lane.mjs` aliases when they exist. Cap to the real candidates;
+   do not invent workflows that are not on disk.
+5. Carry the chosen id as a literal `workflow: <id>` directive into the
+   planner/runner handoff. Never substitute the global Pi default when a
+   project workflow was chosen or is required.
+
+If only the default Pi lane applies (no project workflows, or a single
+project workflow that matches intent), proceed without a selection UI.
+
 ## DTM Cursor lane
 
 When the user names **DTM Cursor**, or the resolved target folder basename is
 `dtm-cursor`, route with the project's current lanes:
 
 1. Prefer `dtm-cursor-plan-verify` for audit/design (`audit` / `normal`),
+   `dtm-cursor-plan-verify-grok` for the Grok+Composer audit variant
+   (`audit-grok` / `normal-grok`),
    `dtm-cursor-implement` for feature work (`implement` → builtin
    `development-core` + project knowledge `dtm-boundary`),
    `dtm-cursor-bug-investigate` for bug diagnosis (`bug` / `bug-investigate`
@@ -91,6 +125,10 @@ When the user names **DTM Cursor**, or the resolved target folder basename is
    → handoff to `implement`), or
    `dtm-cursor-design-optimize` for local redesign options (`design` /
    `design-optimize` → handoff to `implement`, or short `audit` if needed).
+   If the user says only `audit` / `normal` / “監査” and both
+   `dtm-cursor-plan-verify` and `dtm-cursor-plan-verify-grok` exist, treat
+   that as ambiguous and follow **Workflow selection** (do not silently pick
+   Luna or Grok).
 2. Preserve the project's existing `.takt/config.yaml` and custom workflow
    files. Bootstrap may add missing bridge scaffolding.
 3. Resume and recovery use the project's configured Pi provider/workflow.
@@ -144,10 +182,14 @@ limitation instead of claiming that a PR will appear.
   the exact target is known, without turning into queueing or execution.
 - Preserve Pi-only/provider/worktree constraints exactly; do not invent them.
 - For DTM Cursor, route `audit`/`normal` → `dtm-cursor-plan-verify`,
+  `audit-grok`/`normal-grok` → `dtm-cursor-plan-verify-grok`,
   `implement` → `dtm-cursor-implement`, `bug`/`bug-investigate` →
   `dtm-cursor-bug-investigate`, `perf`/`perf-investigate` →
   `dtm-cursor-perf-investigate`, and `design`/`design-optimize` →
-  `dtm-cursor-design-optimize` as documented in the project.
+  `dtm-cursor-design-optimize` as documented in the project. When both audit
+  variants exist and the user did not name one, ask per **Workflow selection**.
+- Never silently pick among multiple matching project workflows; ask once,
+  then carry `workflow: <id>` into the next skill.
 - Carry the profile returned by setup into the next skill; never fall back to a
   guessed profile after setup succeeds.
 - Keep the handoff seamless. Briefly state the next step in human terms

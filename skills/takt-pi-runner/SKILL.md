@@ -73,9 +73,23 @@ manual registration or when the setup tool is unavailable.
 The orchestrator may provide a project-owned workflow directive. Preserve it
 verbatim in the task body and do not replace it with the default Pi lane.
 
+If this skill is invoked directly and the task body has **no** `workflow:`
+line, apply the same ambiguous-only rule as the orchestrator:
+
+1. List `<cwd>/.takt/workflows/*.yaml` stems.
+2. If the user already named a workflow/lane, or exactly one candidate matches
+   intent, use that id.
+3. If two or more candidates remain (same intent class or unspecified lane),
+   ask once with `ask_user_question` / `cursor_ask_question`, then insert
+   `workflow: <chosen-id>` into the prompt body before `takt_exec_prompt`.
+4. Do not ask on resume/recovery of an existing session.
+
 For DTM Cursor (`dtm-cursor`):
 
-- Audit/design: `workflow: dtm-cursor-plan-verify` (`audit` / `normal`).
+- Audit/design (Luna+Composer): `workflow: dtm-cursor-plan-verify`
+  (`audit` / `normal`).
+- Audit/design (Grok+Composer): `workflow: dtm-cursor-plan-verify-grok`
+  (`audit-grok` / `normal-grok`).
 - Feature implementation: `workflow: dtm-cursor-implement` (`implement`).
 - Bug diagnosis: `workflow: dtm-cursor-bug-investigate` (`bug` / `bug-investigate`);
   after the diagnosis report, continue with `implement` rather than mixing
@@ -86,6 +100,8 @@ For DTM Cursor (`dtm-cursor`):
 - Local design options: `workflow: dtm-cursor-design-optimize` (`design` /
   `design-optimize`); after the options report, continue with `implement`
   (or a short `audit` first if the report says so).
+- Bare `audit` / `normal` with both plan-verify variants present → ask; do not
+  silently default to Luna or Grok.
 - Resume and recovery use the project's configured Pi provider/workflow.
 
 ## Recovery
