@@ -82,9 +82,11 @@ to `takt-pi-runner`; do not start a duplicate run.
 When the user names **DTM Cursor**, or the resolved target folder basename is
 `dtm-cursor`, route with the project's current lanes:
 
-1. Prefer `dtm-cursor-plan-verify` for audit/design (`audit` / `normal`), or
+1. Prefer `dtm-cursor-plan-verify` for audit/design (`audit` / `normal`),
    `dtm-cursor-implement` for feature work (`implement` → builtin
-   `development-core` + project knowledge `dtm-boundary`).
+   `development-core` + project knowledge `dtm-boundary`), or
+   `dtm-cursor-bug-investigate` for bug diagnosis (`bug` / `bug-investigate`
+   → handoff to `implement`).
 2. Preserve the project's existing `.takt/config.yaml` and custom workflow
    files. Bootstrap may add missing bridge scaffolding.
 3. Resume and recovery use the project's configured Pi provider/workflow.
@@ -137,8 +139,9 @@ limitation instead of claiming that a PR will appear.
 - Project bootstrap is safe and idempotent; it may happen automatically after
   the exact target is known, without turning into queueing or execution.
 - Preserve Pi-only/provider/worktree constraints exactly; do not invent them.
-- For DTM Cursor, route `audit`/`normal` → `dtm-cursor-plan-verify` and
-  `implement` → `dtm-cursor-implement` as documented in the project.
+- For DTM Cursor, route `audit`/`normal` → `dtm-cursor-plan-verify`,
+  `implement` → `dtm-cursor-implement`, and `bug`/`bug-investigate` →
+  `dtm-cursor-bug-investigate` as documented in the project.
 - Carry the profile returned by setup into the next skill; never fall back to a
   guessed profile after setup succeeds.
 - Keep the handoff seamless. Briefly state the next step in human terms

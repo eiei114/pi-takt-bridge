@@ -77,6 +77,9 @@ For DTM Cursor (`dtm-cursor`):
 
 - Audit/design: `workflow: dtm-cursor-plan-verify` (`audit` / `normal`).
 - Feature implementation: `workflow: dtm-cursor-implement` (`implement`).
+- Bug diagnosis: `workflow: dtm-cursor-bug-investigate` (`bug` / `bug-investigate`);
+  after the diagnosis report, continue with `implement` rather than mixing
+  production fixes into the bug lane.
 - Resume and recovery use the project's configured Pi provider/workflow.
 
 ## Recovery
