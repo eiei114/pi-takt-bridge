@@ -32,8 +32,9 @@ skill creates **one pending task**; it does not start `takt run` or
    If the orchestrator supplied a project workflow directive, keep that literal
    line in the task body; do not remove or rewrite it during summarization.
    For DTM Cursor, use `dtm-cursor-plan-verify` (audit),
-   `dtm-cursor-implement` (feature work), or
-   `dtm-cursor-bug-investigate` (bug diagnosis → implement handoff)
+   `dtm-cursor-implement` (feature work),
+   `dtm-cursor-bug-investigate` (bug diagnosis → implement handoff), or
+   `dtm-cursor-perf-investigate` (perf diagnosis → implement handoff)
    as directed by the orchestrator.
 7. Report the queued project, cwd, session result, and remind the user that
    execution is still pending. Do not call `takt_exec_prompt` in this skill.

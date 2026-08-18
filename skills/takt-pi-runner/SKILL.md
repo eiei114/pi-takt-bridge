@@ -80,6 +80,9 @@ For DTM Cursor (`dtm-cursor`):
 - Bug diagnosis: `workflow: dtm-cursor-bug-investigate` (`bug` / `bug-investigate`);
   after the diagnosis report, continue with `implement` rather than mixing
   production fixes into the bug lane.
+- Perf diagnosis: `workflow: dtm-cursor-perf-investigate` (`perf` / `perf-investigate`);
+  after the diagnosis report, continue with `implement` rather than mixing
+  production optimizations into the perf lane.
 - Resume and recovery use the project's configured Pi provider/workflow.
 
 ## Recovery
