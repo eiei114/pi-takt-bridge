@@ -77,35 +77,22 @@ external `stale`/`unknown` metadata. External runs can be observed but their
 original PTY must not be killed or claimed. Route ownerless checkpoint recovery
 to `takt-pi-runner`; do not start a duplicate run.
 
-## DTM Cursor SWE lane
+## DTM Cursor lane
 
 When the user names **DTM Cursor**, or the resolved target folder basename is
-`dtm-cursor`, use the project's SWE lane instead of the generic Pi/OpenAI or
-Cursor lane:
+`dtm-cursor`, use the project's **normal** Pi/OpenAI + Cursor lane. Do **not**
+route DTM Cursor through Devin SWE:
 
-1. Read and validate the exact target's
-   `.takt/workflows/dtm-cursor-devin-swe.yaml`. It must declare
-   `workflow_config.provider: devin` and `workflow_config.model: swe-1-7`.
-   If the file or either declaration is absent/mismatched, report the exact
-   missing or conflicting value and stop; do not silently fall back to another
-   provider.
+1. Prefer project workflow `dtm-cursor-plan-verify` when present. Do not look
+   for, create, or require `.takt/workflows/dtm-cursor-devin-swe.yaml`.
 2. Preserve the project's existing `.takt/config.yaml` and custom workflow
-   files. Bootstrap may add missing bridge scaffolding, but must not replace
-   DTM-specific provider configuration with generic `pi-docs` settings.
-3. Put this literal routing directive in the finalized task body, on its own
-   line, so TAKT ACP/interactive mode selects the workflow:
-
-   ```text
-   workflow: dtm-cursor-devin-swe
-   ```
-
-4. Treat that workflow as authoritative: it selects provider `devin` and model
-   `swe-1-7` (Devin SWE-1.7 Max). Do not add a Pi/OpenAI fallback or claim that
-   a generic `takt_exec_prompt` run is SWE-backed unless the selected workflow
-   is visible in the TAKT status.
-5. For checkpoint recovery, preserve the run's workflow and call
-   `takt_resume_run` with `provider: "devin"` and `model: "swe-1-7"`. Never
-   resume a DTM SWE checkpoint through the default `pi` provider.
+   files. Bootstrap may add missing bridge scaffolding, but must not inject
+   `provider: devin` or `model: swe-1-7`.
+3. If a task body still contains `workflow: dtm-cursor-devin-swe`, stop and
+   tell the user that the SWE lane was removed on 2026-08-18; rewrite to the
+   normal / Pi workflow only after explicit confirmation.
+4. Resume and recovery use the project's configured Pi provider/workflow.
+   Never resume a DTM Cursor run with `provider: "devin"`.
 
 This routing applies only to DTM Cursor. Other projects keep their explicit
 provider/workflow constraints; if none are specified, use the normal Pi
@@ -155,8 +142,8 @@ limitation instead of claiming that a PR will appear.
 - Project bootstrap is safe and idempotent; it may happen automatically after
   the exact target is known, without turning into queueing or execution.
 - Preserve Pi-only/provider/worktree constraints exactly; do not invent them.
-- Honor the DTM Cursor SWE lane above as an explicit project-specific
-  exception to a generic Pi-only default.
+- For DTM Cursor, use the normal Pi lane only; never reinstate Devin SWE
+  routing.
 - Carry the profile returned by setup into the next skill; never fall back to a
   guessed profile after setup succeeds.
 - Keep the handoff seamless. Briefly state the next step in human terms

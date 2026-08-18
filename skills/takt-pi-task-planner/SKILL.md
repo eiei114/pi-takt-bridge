@@ -29,9 +29,10 @@ skill creates **one pending task**; it does not start `takt run` or
    `takt_project_setup` with the exact target cwd first.
 6. After confirmation, call `takt_enqueue_task` with the finalized body and
    named profile. Preserve the body exactly.
-   If the orchestrator supplied a project workflow directive (for example
-   `workflow: dtm-cursor-devin-swe`), keep that literal line in the task body;
-   do not remove or rewrite it during summarization.
+   If the orchestrator supplied a project workflow directive, keep that literal
+   line in the task body; do not remove or rewrite it during summarization.
+   Exception: never add or preserve `workflow: dtm-cursor-devin-swe` for DTM
+   Cursor — that SWE lane was removed on 2026-08-18; use the normal Pi workflow.
 7. Report the queued project, cwd, session result, and remind the user that
    execution is still pending. Do not call `takt_exec_prompt` in this skill.
 
