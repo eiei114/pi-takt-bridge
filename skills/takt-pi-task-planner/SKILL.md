@@ -31,12 +31,16 @@ skill creates **one pending task**; it does not start `takt run` or
    named profile. Preserve the body exactly.
    If the orchestrator supplied a project workflow directive, keep that literal
    line in the task body; do not remove or rewrite it during summarization.
+   If no `workflow:` line is present and the target has multiple matching
+   project workflows, ask once with `ask_user_question` / `cursor_ask_question`
+   before enqueueing (same ambiguous-only rule as `takt-pi-orchestrator`).
    For DTM Cursor, use `dtm-cursor-plan-verify` (audit),
+   `dtm-cursor-plan-verify-grok` (audit-grok),
    `dtm-cursor-implement` (feature work),
    `dtm-cursor-bug-investigate` (bug diagnosis → implement handoff),
    `dtm-cursor-perf-investigate` (perf diagnosis → implement handoff), or
    `dtm-cursor-design-optimize` (local design options → implement handoff)
-   as directed by the orchestrator.
+   as directed by the orchestrator or the user's selection.
 7. Report the queued project, cwd, session result, and remind the user that
    execution is still pending. Do not call `takt_exec_prompt` in this skill.
 
@@ -61,8 +65,12 @@ skill creates **one pending task**; it does not start `takt run` or
 - <manual or evidence check, if needed>
 
 ## Constraints
+- workflow: <project workflow id when required>
 - <provider, safety, rollout, or other explicit constraint>
 ```
+
+When a project workflow was selected (or supplied by the orchestrator), keep
+that `workflow: <id>` line under **Constraints** so enqueue/exec preserve it.
 
 ## Boundary
 
