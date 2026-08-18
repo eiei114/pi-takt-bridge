@@ -71,16 +71,13 @@ manual registration or when the setup tool is unavailable.
 ## Project workflow overrides
 
 The orchestrator may provide a project-owned workflow directive. Preserve it
-verbatim in the task body and do not replace it with the default Pi lane,
-except for the retired DTM Cursor SWE lane below.
+verbatim in the task body and do not replace it with the default Pi lane.
 
 For DTM Cursor (`dtm-cursor`):
 
-- Prefer `workflow: dtm-cursor-plan-verify` / the project's normal Pi lane.
-- Do **not** inject `workflow: dtm-cursor-devin-swe`, `provider: "devin"`, or
-  `model: "swe-1-7"`. That lane was removed on 2026-08-18.
-- If an existing task/checkpoint still names the SWE workflow, stop and ask
-  before rewriting to the normal Pi workflow. Never silently resume with Devin.
+- Audit/design: `workflow: dtm-cursor-plan-verify` (`audit` / `normal`).
+- Feature implementation: `workflow: dtm-cursor-implement` (`implement`).
+- Resume and recovery use the project's configured Pi provider/workflow.
 
 ## Recovery
 
