@@ -278,9 +278,12 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   const run = findActiveRun(project.summary);
   const hb = heartbeat(run, project.runner?.lastOutputAt, now);
   const spin = taktSpinnerFrame(now, hb.intervalMs);
-  // Auto-generated exec workflow names get long and unreadable; show the
-  // launch time instead (exec@05:15) or cap project-defined names.
-  const workflow = run !== undefined ? prettyWorkflowName(workflowLabel(run)) : undefined;
+  // Auto-generated exec workflow names are per-task noise (the elapsed timer
+  // already covers timing); hide them. Project-defined names stay visible.
+  const rawWorkflow = run !== undefined ? workflowLabel(run) : undefined;
+  const workflow = rawWorkflow !== undefined && !EXEC_NAME_PATTERN.test(rawWorkflow)
+    ? truncateInline(rawWorkflow, 22)
+    : undefined;
   const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
   // Bridge lifecycle states that precede or wrap the actual TAKT run.
   if (project.stage === "clearing") {
@@ -392,14 +395,6 @@ export function fitTaktWidgetLines(lines: readonly string[], width: number): str
 const EXEC_NAME_PATTERN = /^exec-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-/;
 
 /** `exec-20260822-051544-…` → `exec@05:15`; other names pass through capped. */
-export function prettyWorkflowName(name: string): string {
-  const match = EXEC_NAME_PATTERN.exec(name);
-  if (match !== null) {
-    return `exec@${match[4]}:${match[5]}`;
-  }
-  return truncateInline(name, 22);
-}
-
 /** Plain-words running/done counts for the header line. */
 function summaryCounts(projects: readonly TaktProjectWidgetEntry[]): string {
   let running = 0;

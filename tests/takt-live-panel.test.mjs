@@ -339,7 +339,7 @@ test("project stack truncates long paths to the Pi widget width", () => {
   }
 });
 
-test("project stack truncates long auto-generated workflow names in rows", () => {
+test("auto-generated exec workflow names are hidden from session rows", () => {
   const lines = renderTaktProjectStack([{
     id: "a",
     label: "pg",
@@ -367,8 +367,8 @@ test("project stack truncates long auto-generated workflow names in rows", () =>
   }], 90, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
 
   const row = lines.at(-1) ?? "";
-  assert.ok(row.includes("exec@02:54"), row);
-  assert.ok(!row.includes("exec-20260822"));
+  assert.ok(row.includes("🟢 pg"), row);
+  assert.ok(!row.includes("exec"), row);
 });
 
 

@@ -8,8 +8,9 @@
 - Make the widget self-explanatory at a glance: the input line speaks without
   jargon ("⌨️ You are typing in Pi", "🤖 Autopilot on — Pi watches TAKT"),
   the header reads `N sessions · X running · Y done` instead of the
-  marionette-string metaphor, and auto-generated exec workflow names render
-  as `exec@HH:MM`.
+  marionette-string metaphor, auto-generated exec workflow names are dropped
+  from rows entirely (the elapsed clock covers timing), and project-defined
+  workflow names stay visible.
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
 - Add an activity heartbeat and live elapsed clock to active rows: spinner
   speed follows real TAKT output (fast when writing, slowing when quiet,
