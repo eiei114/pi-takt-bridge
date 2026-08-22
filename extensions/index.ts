@@ -1952,7 +1952,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   /** Every known session as (project, widget entry) pairs, most active first. */
-  private sessionPairs(): Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }> {
+  sessionPairs(): Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }> {
     const pairs = [...this.projects.values()]
       .filter((project) => project.runner.hasSession || project.runner.isRunning || project.summary !== undefined)
       .map((project) => ({
@@ -2743,6 +2743,67 @@ export default function register(pi: ExtensionAPI): void {
     await runtime.initialize();
     return runtime;
   };
+
+  // No-slash conversational actions: "@<session> <verb>" selects a session and
+  // runs the same operations the slash commands expose, without typing /takt:*.
+  pi.on("input", async (event, context) => {
+    const text = event.text ?? "";
+    const match = /^\s*@([\w.-]+)\s+(stop|inspect|tasks|task|flush|status|live|talk)(?:\s+([\s\S]*))?$/i.exec(text.trim());
+    if (match === null) {
+      return { action: "continue" };
+    }
+    try {
+      const runtimeRef = await getRuntime(context);
+      const sessions = runtimeRef.sessionPairs();
+      const target = resolveSessionByMention(
+        sessions.map((session) => ({ label: session.entry.label, cwd: session.entry.cwd })),
+        match[1],
+      );
+      const project = sessions.find((session) => session.entry.cwd === target?.cwd)?.project;
+      if (project === undefined) {
+        return { action: "continue" };
+      }
+      const verb = match[2].toLocaleLowerCase();
+      const rest = (match[3] ?? "").trim();
+      switch (verb) {
+        case "stop":
+          await runtimeRef.stopActive(project.cwd, { confirm: false });
+          context.ui.notify(`TAKT ${project.label} stopped.`, "info");
+          break;
+        case "inspect":
+          await runtimeRef.inspectSessions();
+          break;
+        case "tasks":
+        case "task":
+          await manipulateTasksFromInspector(context, project);
+          break;
+        case "flush":
+          await runtimeRef.flushQueuedInputs(project.cwd);
+          break;
+        case "status":
+          await showStatus(context, project.cwd, runtimeRef.getProjectStatus(project.cwd));
+          break;
+        case "live":
+          await runtimeRef.peekSession(project.cwd);
+          break;
+        case "talk":
+          if (rest.length === 0) {
+            await talkToSession(context, project, sessions);
+          } else if (project.runner.isRunning && project.stage !== "waiting_prompt") {
+            const depth = project.queuedInputs?.enqueue(rest) ?? 0;
+            context.ui.notify(`⏳ ${project.label} executing; queued (⏳q${depth}).`, "info");
+          } else {
+            project.runner.write(formatTaktPastedInput(rest));
+            context.ui.notify(`Message sent to TAKT ${project.label}.`, "info");
+          }
+          break;
+      }
+      return { action: "handled" };
+    } catch (error) {
+      context.ui.notify(`@-action failed: ${errorMessage(error)}`, "error");
+      return { action: "continue" };
+    }
+  });
 
   pi.registerTool({
     name: "takt_project_setup",

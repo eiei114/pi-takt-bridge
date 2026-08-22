@@ -12,12 +12,18 @@
   from rows entirely (the elapsed clock covers timing), and project-defined
   workflow names stay visible.
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
+- Let `@<session> <verb>` run session actions without a slash command:
+  `@playground2 stop|inspect|tasks|flush|status|live|talk <text>` are caught by
+  an input router and handled locally; the message never reaches the agent.
 - Extend the editor's `@` mention to include running TAKT sessions: type `@`
   and session labels complete alongside file mentions (built-in path completion
   is preserved); the inserted `@<label>` pairs with `/takt:ask`.
 - Add `/takt:ask [@label] <message>` conversational routing and make
   `/takt:inspect` actionable: `t` talks to the selected session, `s` stops it,
   `l` lists/edits its queued tasks (reset to pending or delete).
+- Let `@<session> <verb>` run session actions without a slash command:
+  `@playground2 stop|inspect|tasks|flush|status|live|talk <text>` are caught by
+  an input router and handled locally; the message never reaches the agent.
 - Extend the editor's `@` mention to include running TAKT sessions: typing `@`
   completes session labels alongside the built-in file mention (path
   completion stays intact); the inserted `@<label>` pairs with `/takt:ask`.

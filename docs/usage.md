@@ -163,6 +163,20 @@ raw PTY. Such external activity never renders in the live widget automatically;
 inspect it explicitly with `/takt:status [path]` or `takt_read_screen`, and Pi
 still never kills it.
 
+Typing `@<label> <verb>` in the editor runs those actions without any
+slash command — the message never reaches the main agent:
+
+- `@playground2 stop` — stop that session
+- `@playground2 inspect` — open the live inspector
+- `@playground2 tasks` — list/delete/reset its queued tasks
+- `@playground2 flush` — flush its queued input
+- `@playground2 status` — diagnostic status overlay
+- `@playground2 live` — peek its raw screen
+- `@playground2 talk <text>` — send a message (queued while executing)
+
+A matching session is resolved from the `@` label (exact, then unique
+prefix/suffix); unknown labels fall through to the agent.
+
 ## Conversational control and @ mentions
 
 `/takt:ask @<label> <message>` sends a message to a specific TAKT session; with
