@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make the widget self-explanatory at a glance: the input line states in
+  plain words where keystrokes go (for example `⌨️ mode pi-auto · Pi drives
+  TAKT`), the header counts sessions with running/done badges instead of the
+  marionette-string metaphor, and auto-generated exec workflow names render
+  as `exec@HH:MM`.
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
 - Add an activity heartbeat and live elapsed clock to active rows: spinner
   speed follows real TAKT output (fast when writing, slowing when quiet,
