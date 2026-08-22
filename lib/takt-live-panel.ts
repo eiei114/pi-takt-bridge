@@ -288,12 +288,8 @@ function describeActiveRun(run: TaktRunSnapshot): string {
   const workerSuffix = run.workers && run.workers.total > 0
     ? ` w${run.workers.done}/${run.workers.total}`
     : "";
-  const phaseSuffix = run.phase
-    ? ` p${run.phase}/3`
-    : "";
-  const iterationSuffix = run.currentIteration !== undefined ? ` i${run.currentIteration}` : "";
   const stepName = run.currentStep ?? "working";
-  return `🔨 ${stepName}${position}${workerSuffix} ${phaseSuffix}${iterationSuffix}`.replaceAll("  ", " ").trimEnd();
+  return `🔨 ${stepName}${position}${workerSuffix}`;
 }
 
 const STEP_METER_CELLS = 10;

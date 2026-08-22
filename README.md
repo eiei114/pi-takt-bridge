@@ -113,7 +113,7 @@ TAKT process launched from this Pi session, with the most active first —
 
 ```
 🎭 TAKT · 3 strings
-⠋ 🟢 repo-a · dual    ███▓░░░░░░░ 🔨 implement 2/3 · p1/3 i2
+⠋ 🟢 repo-a · dual    ███▓░░░░░░░ 🔨 implement 2/3 w1/2
 └ 📄 lib/takt-state.ts
 ✅ repo-b · default    done · 12m
 ```
