@@ -98,7 +98,7 @@ test("project stack shows session-owned rows with spinner and hides raw output",
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
   ], 60, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
 
-  assert.ok(lines[0]?.includes("mode pi"), String(lines[0]));
+  assert.ok(lines[0]?.includes("typing in Pi"), String(lines[0]));
   // Marionette header with the owned-session count.
   assert.ok(lines.some((line) => line.includes("🎭 TAKT · 1 session")));
   // Externally started projects never render here...
@@ -112,7 +112,7 @@ test("project stack shows session-owned rows with spinner and hides raw output",
   const autoLines = renderTaktProjectStack([
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
   ], 30, "pi-auto");
-  assert.ok(autoLines[0]?.includes("pi-auto"));
+  assert.ok(autoLines[0]?.includes("Autopilot"));
   liveTerminal.dispose();
 });
 
@@ -164,7 +164,7 @@ test("project stack keeps requesting renders while a live PTY screen changes", a
 
 test("project stack shows input mode even with no active sessions", () => {
   const lines = renderTaktProjectStack([], 40, "takt");
-  assert.match(lines[0] ?? "", /mode takt/);
+  assert.match(lines[0] ?? "", /typing into TAKT/);
   assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 

@@ -392,7 +392,7 @@ export function prettyWorkflowName(name: string): string {
   return truncateInline(name, 22);
 }
 
-/** Compact running/done counts for the header line. */
+/** Plain-words running/done counts for the header line. */
 function summaryCounts(projects: readonly TaktProjectWidgetEntry[]): string {
   let running = 0;
   let done = 0;
@@ -402,11 +402,10 @@ function summaryCounts(projects: readonly TaktProjectWidgetEntry[]): string {
     if (run !== undefined && isActiveRunState(run)) running += 1;
     else done += 1;
   }
-  if (running === 0 && done === 0) return "idle";
   const parts: string[] = [];
-  if (running > 0) parts.push(`▶${running}`);
-  if (done > 0) parts.push(`✓${done}`);
-  return parts.join(" ");
+  if (running > 0) parts.push(`${running} running`);
+  if (done > 0) parts.push(`${done} done`);
+  return parts.length > 0 ? parts.join(" · ") : "starting";
 }
 
 function isPreparingProject(project: TaktProjectWidgetEntry): boolean {

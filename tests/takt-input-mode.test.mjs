@@ -21,9 +21,9 @@ test("parseTaktInputMode accepts mode names and cycle aliases", () => {
 });
 
 test("formatTaktInputModeLine states where keys go in plain words", () => {
-  assert.match(formatTaktInputModeLine("pi"), /mode pi/);
-  assert.match(formatTaktInputModeLine("takt"), /keys go to TAKT/);
-  assert.match(formatTaktInputModeLine("pi-auto"), /Pi drives TAKT/);
+  assert.match(formatTaktInputModeLine("pi"), /typing in Pi/);
+  assert.match(formatTaktInputModeLine("takt"), /typing into TAKT/);
+  assert.match(formatTaktInputModeLine("pi-auto"), /Autopilot/);
 });
 
 test("isDestructiveTaktAutoInput gates clear/stop style follow-ups", () => {

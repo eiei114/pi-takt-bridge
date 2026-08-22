@@ -112,7 +112,7 @@ widget is a session-owned, summary-only view: it renders one compact row per
 TAKT process launched from this Pi session, with the most active first —
 
 ```
-🎭 TAKT · 3 strings
+🎭 TAKT · 3 sessions · 1 running · 2 done
 ⠋ 🟢 repo-a · dual    ███▓░░░░░░░ 🔨 implement 2/3 w1/2
 ✅ repo-b · default    done · 12m
 ```

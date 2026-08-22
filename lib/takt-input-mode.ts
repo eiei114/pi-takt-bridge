@@ -28,14 +28,14 @@ export function parseTaktInputMode(value: string | undefined): TaktInputMode | "
 
 /** Compact widget/status label for the three-state cycle. */
 export function formatTaktInputModeLine(mode: TaktInputMode): string {
-  // One glance should answer "where do my keystrokes go right now?".
+  // Zero jargon: the line must answer "who is typing right now?" by itself.
   switch (mode) {
     case "pi":
-      return "⌨️ mode pi · you are typing in Pi · Ctrl+Alt+T switches";
+      return "⌨️ You are typing in Pi · TAKT runs beside you · Ctrl+Alt+T switches";
     case "takt":
-      return "⌨️ mode takt · keys go to TAKT · Esc returns to Pi";
+      return "⌨️ You are typing into TAKT · Esc returns to Pi";
     case "pi-auto":
-      return "⌨️ mode pi-auto · Pi drives TAKT · Ctrl+Alt+T switches";
+      return "🤖 Autopilot on — Pi watches TAKT and answers follow-ups";
   }
 }
 
