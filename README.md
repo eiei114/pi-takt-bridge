@@ -45,6 +45,7 @@ pi -e C:/path/to/pi-takt-marionette/extensions/index.ts
 | `/takt` | Start or attach to the live TAKT widget |
 | `/takt:live [path]` | Peek a session's raw TAKT screen (Esc closes) |
 | `/takt:sessions` | List TAKT sessions with status and pick one to peek |
+| `/takt:ask [@label] <msg>` | Talk to a TAKT session, routed by @mention |
 | `/takt:inspect` | Live session inspector: ↑/↓ pick a session, see its state, Enter peeks raw screen |
 | `/takt:flush [path]` | Send queued input lines to the running TAKT session |
 | `/takt:lang [en|ja]` | Switch widget language for this session (no argument toggles) |

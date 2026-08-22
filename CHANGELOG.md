@@ -12,6 +12,18 @@
   from rows entirely (the elapsed clock covers timing), and project-defined
   workflow names stay visible.
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
+- Extend the editor's `@` mention to include running TAKT sessions: type `@`
+  and session labels complete alongside file mentions (built-in path completion
+  is preserved); the inserted `@<label>` pairs with `/takt:ask`.
+- Add `/takt:ask [@label] <message>` conversational routing and make
+  `/takt:inspect` actionable: `t` talks to the selected session, `s` stops it,
+  `l` lists/edits its queued tasks (reset to pending or delete).
+- Extend the editor's `@` mention to include running TAKT sessions: typing `@`
+  completes session labels alongside the built-in file mention (path
+  completion stays intact); the inserted `@<label>` pairs with `/takt:ask`.
+- Add `/takt:ask [@label] <message>` for @-routed conversational input, and
+  make `/takt:inspect` actionable: `t` talks to the selected session, `s`
+  stops it, `l` lists/edits its queued tasks (reset to pending or delete).
 - Add `/takt:inspect`, a live session inspector: arrow through running
   sessions, see what each is doing right now (step, workers, elapsed,
   heartbeat, queued depth), and Enter to peek its raw screen.

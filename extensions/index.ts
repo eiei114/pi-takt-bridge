@@ -49,6 +49,7 @@ import {
   readTaktSummary,
   reconcileRunAsAborted,
   type TaktStateOptions,
+  readTaskItems,
 } from "../lib/takt-state.ts";
 import {
   formatTaktLastExit,
@@ -66,6 +67,9 @@ import {
   taktSpinnerFrame,
 } from "../lib/takt-live-panel.ts";
 import { workflowLabel } from "../lib/takt-progress.ts";
+import { removeTaktTask, resetTaktTaskToPending, readTaktTaskFile } from "../lib/takt-task-edit.ts";
+import { type TaktTaskFileEntry } from "../lib/takt-task-edit.ts";
+import { parseSessionMention, resolveSessionByMention } from "../lib/takt-session-mention.ts";
 import {
   collectSelectableSteps,
   listWorkflowNames,
@@ -361,7 +365,60 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
         .catch((error) => this.recordStatusRefreshError(error));
     }, REFRESH_INTERVAL_MS);
     this.refreshTimer.unref?.();
+    this.registerSessionMentionAutocomplete();
     this.initialized = true;
+  }
+
+  /** Stack TAKT session suggestions onto the built-in @ mention (file/path) completion. */
+  private registerSessionMentionAutocomplete(): void {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    const runtimeRef = this;
+    if (typeof context.ui.addAutocompleteProvider !== "function") {
+      return;
+    }
+    context.ui.addAutocompleteProvider((current) => ({
+      triggerCharacters: ["@"],
+      async getSuggestions(lines, cursorLine, cursorCol, options) {
+        const line = lines[cursorLine] ?? "";
+        const beforeCursor = line.slice(0, cursorCol);
+        const match = /(?:^|[ 	])@([^\s@]*)$/.exec(beforeCursor);
+        if (match === null) {
+          return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        }
+        const query = (match[1] ?? "").toLocaleLowerCase();
+        const items = runtimeRef.sessionCompletionEntries()
+          .filter((entry) =>
+            entry.label.toLocaleLowerCase().includes(query) ||
+            entry.cwd.toLocaleLowerCase().includes(query))
+          .slice(0, 8)
+          .map((entry) => ({
+            value: `@${entry.label}`,
+            label: `@${entry.label}`,
+            description: `TAKT session · ${entry.cwd}`,
+          }));
+        if (items.length > 0) {
+          return { prefix: `@${query}`, items };
+        }
+        // No matching session: keep the existing file/path mention behavior intact.
+        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+      },
+      shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
+        return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
+      },
+      applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+        return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+      },
+    }));
+  }
+
+  /** Labels + cwd for @ mention completion over known sessions. */
+  private sessionCompletionEntries(): Array<{ label: string; cwd: string }> {
+    return [...this.projects.values()]
+      .filter((project) => project.runner.hasSession || project.runner.isRunning || project.summary !== undefined)
+      .map((project) => ({ label: project.label, cwd: project.cwd }));
   }
 
   async enqueueTask(
@@ -1847,13 +1904,51 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
   }
 
+  /** /takt:ask [@label] <message> — conversational input routed by @mention. */
+  async askAgent(args = ""): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    const sessions = this.sessionPairs();
+    const mentioned = parseSessionMention(args);
+    let project: ManagedProject | undefined;
+    if (mentioned.token !== undefined) {
+      const target = resolveSessionByMention(
+        sessions.map((session) => ({ label: session.entry.label, cwd: session.entry.cwd })),
+        mentioned.token,
+      );
+      project = sessions.find((session) => session.entry.cwd === target?.cwd)?.project;
+    } else if (sessions.length === 1) {
+      project = sessions[0].project;
+    }
+    if (!project) {
+      context.ui.notify("Usage: /takt:ask @<name> <message> (a single session also works without @).", "info");
+      return;
+    }
+    const text = mentioned.rest || (await context.ui.input(`Talk to ${project.label}`, "message for the TAKT agent")) || "";
+    if (!text.trim()) {
+      return;
+    }
+    if (project.runner.isRunning && project.stage !== "waiting_prompt") {
+      const depth = project.queuedInputs?.enqueue(text) ?? 0;
+      context.ui.notify(`⏳ ${project.label} executing; queued (⏳q${depth}).`, "info");
+      return;
+    }
+    project.runner.write(formatTaktPastedInput(text));
+    context.ui.notify(`Message sent to TAKT ${project.label}.`, "info");
+  }
+
   /** /takt:inspect — live list of running sessions; arrows move, enter peeks. */
   async inspectSessions(): Promise<void> {
     const context = this.context;
     if (!context?.hasUI) {
       return;
     }
-    await openTaktSessionInspector(context, () => this.sessionPairs());
+    await openTaktSessionInspector(
+      { ...context, runtimeRef: this },
+      () => this.sessionPairs(),
+    );
   }
 
   /** Every known session as (project, widget entry) pairs, most active first. */
@@ -2190,7 +2285,7 @@ function compareManagedProjectsForMenu(left: ManagedProject, right: ManagedProje
 
 /** Live, arrow-driven session inspector: state line per session, Enter peeks raw screen. */
 function openTaktSessionInspector(
-  context: ExtensionContext,
+  context: ExtensionContext & { runtimeRef?: TaktBridgeRuntime },
   getSessions: () => Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }>,
 ): Promise<void> {
   return context.ui.custom<void>((_tui, theme, _keybindings, done) => {
@@ -2202,7 +2297,7 @@ function openTaktSessionInspector(
       sessions = getSessions();
       cursor = Math.min(cursor, Math.max(0, sessions.length - 1));
       const lines: string[] = [
-        theme.fg("accent", "🎭 TAKT sessions · ↑/↓ move · Enter raw screen · Esc close"),
+        theme.fg("accent", "🎭 TAKT sessions · ↑/↓ move · t talk · s stop · l tasks · Enter peek · Esc close"),
         theme.fg("dim", "(live — what each session is doing right now)"),
         "",
       ];
@@ -2247,10 +2342,141 @@ function openTaktSessionInspector(
         if (matchesKey(data, "down")) {
           cursor = Math.min(Math.max(0, sessions.length - 1), cursor + 1);
           refresh();
+          return;
+        }
+        if (matchesKey(data, "t")) {
+          void talkToSession(context, sessions[cursor]?.project, sessions);
+          return;
+        }
+        if (matchesKey(data, "s")) {
+          void stopSessionFromInspector(context, sessions[cursor]?.project);
+          return;
+        }
+        if (matchesKey(data, "l") || matchesKey(data, "tab")) {
+          void manipulateTasksFromInspector(context, sessions[cursor]?.project);
         }
       },
     };
   }, { overlay: true });
+}
+
+/** Conversational input to a selected session: at the prompt it is sent
+ * immediately; mid-execution it goes through the input queue. The inspector
+ * stays open, so this is a back-and-forth channel with the TAKT agent. */
+async function talkToSession(
+  context: ExtensionContext,
+  project: ManagedProject | undefined,
+  sessions: Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }> = [],
+): Promise<void> {
+  const mentions = sessions.map((session) => ({ label: session.entry.label, cwd: session.entry.cwd }));
+  const rawText = await context.ui.input(
+    project !== undefined ? `Talk to ${project.label}` : "Talk to a TAKT session (@name to target)",
+    "@session-name message, or plain message for the selected session",
+  );
+  if (rawText === undefined || !rawText.trim()) {
+    return;
+  }
+  let text = rawText;
+  const mentioned = parseSessionMention(rawText);
+  if (mentioned.token !== undefined) {
+    const target = resolveSessionByMention(mentions, mentioned.token);
+    if (target !== undefined) {
+      project = sessions.find((session) => session.entry.cwd === target.cwd)?.project ?? project;
+      text = mentioned.rest;
+    }
+  }
+  if (!project) {
+    context.ui.notify("No session selected and @name did not match one.", "info");
+    return;
+  }
+  if (!text.trim()) {
+    return;
+  }
+  if (project.runner.isRunning && project.stage !== "waiting_prompt") {
+    const depth = project.queuedInputs?.enqueue(text) ?? 0;
+    context.ui.notify(`⏳ ${project.label} is executing; queued (⏳q${depth}). It flushes when ready or via /takt:flush.`, "info");
+    return;
+  }
+  project.runner.write(formatTaktPastedInput(text));
+  context.ui.notify(`Message sent to TAKT ${project.label}.`, "info");
+}
+
+/** Graceful stop of the selected bridge-owned session. */
+async function stopSessionFromInspector(
+  context: ExtensionContext & { runtimeRef?: TaktBridgeRuntime },
+  project: ManagedProject | undefined,
+): Promise<void> {
+  if (!project) {
+    context.ui.notify("No session selected.", "info");
+    return;
+  }
+  const confirmed = await context.ui.confirm(
+    "Stop TAKT session",
+    `Interrupt ${project.label}?
+${project.cwd}`,
+  );
+  if (!confirmed) {
+    return;
+  }
+  if (!context.runtimeRef) {
+    return;
+  }
+  const result = await context.runtimeRef.stopActive(project.cwd, { confirm: false });
+  context.ui.notify(
+    result.stopped
+      ? `TAKT ${project.label} stopped.`
+      : `TAKT ${project.label} was not running.`,
+    "info",
+  );
+}
+
+/** Pick a queued task of the selected session and delete or reset it. */
+async function manipulateTasksFromInspector(
+  context: ExtensionContext,
+  project: ManagedProject | undefined,
+): Promise<void> {
+  if (!project) {
+    context.ui.notify("No session selected.", "info");
+    return;
+  }
+  let tasks: TaktTaskFileEntry[] = [];
+  try {
+    tasks = (await readTaskItems(project.cwd))
+      .filter((item): item is typeof item & { name: string } => item.name !== undefined)
+      .map((item) => ({ name: item.name }));
+  } catch {
+    tasks = readTaktTaskFile(project.cwd)?.tasks ?? [];
+  }
+  const eligible = tasks.filter((task) => task.name !== undefined);
+  if (eligible.length === 0) {
+    context.ui.notify(`No queued tasks in ${project.label}.`, "info");
+    return;
+  }
+  const chosen = await context.ui.select(
+    `Tasks in ${project.label}`,
+    eligible.map((task) => `${task.name} (${task.status ?? "?"})`),
+  );
+  if (!chosen) {
+    return;
+  }
+  const name = eligible.find((task) => chosen.startsWith(task.name))?.name;
+  if (name === undefined) {
+    return;
+  }
+  const action = await context.ui.select(`Task ${name}`, [
+    "reset to pending",
+    "delete task",
+    "nothing",
+  ]);
+  if (action === "reset to pending") {
+    resetTaktTaskToPending(project.cwd, name)
+      ? context.ui.notify(`Reset to pending: ${name}.`, "info")
+      : context.ui.notify(`Task not found: ${name}.`, "warning");
+  } else if (action === "delete task") {
+    removeTaktTask(project.cwd, name)
+      ? context.ui.notify(`Deleted task: ${name}.`, "info")
+      : context.ui.notify(`Task not found: ${name}.`, "warning");
+  }
 }
 
 /** Esc-closable raw screen overlay; the default widget stays summary-only. */
@@ -2852,7 +3078,14 @@ export default function register(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("takt:inspect", {
+  pi.registerCommand("takt:ask", {
+    description: "Talk to a TAKT session: /takt:ask @label <message>",
+    handler: async (args, _context) => {
+      await runtime?.askAgent(args);
+    },
+  });
+
+pi.registerCommand("takt:inspect", {
     description: "Live session inspector: see and pick what each TAKT session is doing",
     handler: async (_args, _context) => {
       await runtime?.inspectSessions();

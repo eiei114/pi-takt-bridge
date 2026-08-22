@@ -163,6 +163,24 @@ raw PTY. Such external activity never renders in the live widget automatically;
 inspect it explicitly with `/takt:status [path]` or `takt_read_screen`, and Pi
 still never kills it.
 
+## Conversational control and @ mentions
+
+`/takt:ask @<label> <message>` sends a message to a specific TAKT session; with
+one session `@` is optional. While a workflow is executing the message is
+queued and flushed when the session is ready. The editor's `@` completion
+now also lists running TAKT sessions next to file mentions — pick one to insert
+`@<label>` and use it with `/takt:ask`.
+
+`/takt:inspect` doubles as a control panel:
+
+- `t` — talk to the selected session (conversational input)
+- `s` — stop the selected session (confirms first)
+- `l` — list the session's queued tasks, then reset one to pending or delete it
+
+Stopping or mutating tasks edits `.takt/tasks.yaml` directly and is safe while
+the bridge owns the terminal; avoid doing it while another daemon is running
+the same queue.
+
 ## Inspecting what a session is doing
 
 `/takt:inspect` opens a live, arrow-driven session list: every known session
