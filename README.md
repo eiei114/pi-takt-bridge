@@ -8,6 +8,10 @@
 ![Pi Package](https://img.shields.io/badge/Pi-Package-blue)
 [![Trusted Publishing](https://img.shields.io/badge/npm-provenance-yellow)](https://docs.npmjs.com/generating-provenance-statements)
 
+<p align="center">
+  <img src="assets/icon-pi-takt.png" alt="pi-takt-marionette icon" width="320">
+</p>
+
 Pi extension for running and monitoring [TAKT](https://github.com/eiei114/takt)
 projects in stacked live widgets inside the Pi TUI.
 
