@@ -3,11 +3,7 @@
 ## Unreleased
 
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
-- Add sub-step progress to session rows: a 10-cell meter fills by completed
-  workflow steps and advances inside the active step through its execute →
-  report → judge phases, and active rows gain a dim `📄 <path>` sub-line with
-  the most recent file-like path scraped from the session's own screen.
-  Workflow names in rows are capped to 22 characters so auto-generated exec
+- Cap workflow names in session rows to 22 characters so auto-generated exec
   slugs no longer truncate the rest of the line.
 - Rename the package and repository to `pi-takt-marionette` (npm was never
   published under the old name; GitHub redirects the old URL). Saved profiles

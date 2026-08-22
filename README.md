@@ -114,16 +114,13 @@ TAKT process launched from this Pi session, with the most active first —
 ```
 🎭 TAKT · 3 strings
 ⠋ 🟢 repo-a · dual    ███▓░░░░░░░ 🔨 implement 2/3 w1/2
-└ 📄 lib/takt-state.ts
 ✅ repo-b · default    done · 12m
 ```
 
 A rotating braille spinner means the session is actively operated; completed
 and failed sessions stop spinning (`✅` done, `🔴 … ❌ failed` plus an error
 snippet). Rows show discrete facts only — step position and parallel worker
-completion (w2/3) — instead of a synthetic progress bar. Under active rows,
-a dim `📄 <path>` line surfaces the most recent file-like path seen on the
-session's own screen (heuristic, stateless). Raw PTY output is never shown by
+completion (w2/3) — instead of a synthetic progress bar. Raw PTY output is never shown by
 default: peek it explicitly with `/takt:live [path]` or `/takt:sessions`, or
 inspect external runs (other terminals or other Pi sessions) via
 `/takt:status [path]` or `takt_read_screen`. This only cleans the Pi display;

@@ -372,46 +372,4 @@ test("project stack truncates long auto-generated workflow names in rows", () =>
 });
 
 
-test("active rows show a file-unit sub-line extracted from the owned PTY", async () => {
-  const liveTerminal = new Terminal({ cols: 60, rows: 12, allowProposedApi: true });
-  await new Promise((resolve) => liveTerminal.write([
-    "worker-1 · reading sources",
-    "Read lib/takt-state.ts ok",
-    "Edit lib/takt-progress.ts applied",
-    "",
-  ].join("\r\n"), resolve));
-
-  const lines = renderTaktProjectStack([{
-    id: "a",
-    label: "pg",
-    cwd: "C:/pg",
-    runner: { terminal: liveTerminal, hasSession: true, isRunning: true, resize() {} },
-    stage: "running",
-    summary: {
-      cwd: "C:/pg",
-      status: "live",
-      running: 1,
-      pending: 0,
-      blocked: 0,
-      failed: 0,
-      completed: 0,
-      stale: 0,
-      runs: [{
-        slug: "r",
-        task: "t",
-        workflow: "trial-marionette",
-        status: "running",
-        sessionStatus: "live",
-        workflowSteps: ["plan", "implement", "verify"],
-        currentStep: "implement",
-        phase: 1,
-      }],
-    },
-  }], 90, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
-
-  const row = lines.find((line) => line.includes("🟢 pg"));
-  assert.ok(row !== undefined);
-  assert.ok(lines.some((line) => line.startsWith("└ 📄 ") && line.includes("lib/takt-progress.ts")), JSON.stringify(lines));
-  liveTerminal.dispose();
-});
 
