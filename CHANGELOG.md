@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-08-22
 
 - Add `/takt:lang`-style language switching: `/takt:lang [en|ja]` toggles or
   sets the widget UI language per session; English stays the default and the
