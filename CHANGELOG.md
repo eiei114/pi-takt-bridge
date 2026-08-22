@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 - 2026-08-22
+
+- Add the pi-takt-marionette mascot icon to the README and package assets:
+  a cute `π` puppeteer controls a `TAKT` marionette with three precisely
+  anchored strings.
+- Include `assets/` in the published package files.
+
 ## 0.3.0 - 2026-08-22
 
 - Add `/takt:lang`-style language switching: `/takt:lang [en|ja]` toggles or
