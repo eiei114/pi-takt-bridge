@@ -163,6 +163,15 @@ raw PTY. Such external activity never renders in the live widget automatically;
 inspect it explicitly with `/takt:status [path]` or `takt_read_screen`, and Pi
 still never kills it.
 
+## Inspecting what a session is doing
+
+`/takt:inspect` opens a live, arrow-driven session list: every known session
+shows its current state (`⏳q<N>` queue depth, step/phase/worker position,
+elapsed clock, heartbeat/spinner). `↑`/`↓` move between sessions,
+`Enter` opens the raw screen peek of the selected session, `Esc` closes. The
+list refreshes once a second while open, so you can watch a workflow advance
+without staring at the raw PTY.
+
 ## Queued input while executing
 
 Input typed while the workflow is executing no longer vanishes. Lines from

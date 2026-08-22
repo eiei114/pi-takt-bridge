@@ -59,6 +59,14 @@ import {
 } from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
 import {
+  describeActiveRun,
+  formatElapsed,
+  heartbeat,
+  sessionRow,
+  taktSpinnerFrame,
+} from "../lib/takt-live-panel.ts";
+import { workflowLabel } from "../lib/takt-progress.ts";
+import {
   collectSelectableSteps,
   listWorkflowNames,
   type WorkflowStepRef,
@@ -1839,6 +1847,39 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
   }
 
+  /** /takt:inspect — live list of running sessions; arrows move, enter peeks. */
+  async inspectSessions(): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    await openTaktSessionInspector(context, () => this.sessionPairs());
+  }
+
+  /** Every known session as (project, widget entry) pairs, most active first. */
+  private sessionPairs(): Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }> {
+    const pairs = [...this.projects.values()]
+      .filter((project) => project.runner.hasSession || project.runner.isRunning || project.summary !== undefined)
+      .map((project) => ({
+        project,
+        entry: {
+          id: project.id,
+          label: project.label,
+          cwd: project.cwd,
+          runner: project.runner,
+          summary: project.summary,
+          stage: project.stage,
+          promptPreview: project.promptPreview,
+          queueDepth: project.queuedInputs?.depth() ?? 0,
+        },
+      }));
+    return pairs.sort((left, right) => {
+      const score = (pair: { project: ManagedProject }): number =>
+        pair.project.runner.isRunning ? 2 : pair.project.runner.hasSession ? 1 : 0;
+      return score(right) - score(left) || left.entry.label.localeCompare(right.entry.label);
+    });
+  }
+
   private hasDisplayableProject(): boolean {
     // Session-owned view only: externally started TAKT activity must not mount
     // or keep the live widget here. Explicit diagnostics (/takt:status,
@@ -2145,6 +2186,71 @@ function compareManagedProjectsForMenu(left: ManagedProject, right: ManagedProje
   const score = (project: ManagedProject): number =>
     project.runner.isRunning ? 2 : project.runner.hasSession ? 1 : 0;
   return score(right) - score(left) || left.label.localeCompare(right.label);
+}
+
+/** Live, arrow-driven session inspector: state line per session, Enter peeks raw screen. */
+function openTaktSessionInspector(
+  context: ExtensionContext,
+  getSessions: () => Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }>,
+): Promise<void> {
+  return context.ui.custom<void>((_tui, theme, _keybindings, done) => {
+    let cursor = 0;
+    let sessions: Array<{ project: ManagedProject; entry: TaktProjectWidgetEntry }> = [];
+    const text = new Text("", 0, 0);
+
+    const refresh = (nowMs = Date.now()): void => {
+      sessions = getSessions();
+      cursor = Math.min(cursor, Math.max(0, sessions.length - 1));
+      const lines: string[] = [
+        theme.fg("accent", "🎭 TAKT sessions · ↑/↓ move · Enter raw screen · Esc close"),
+        theme.fg("dim", "(live — what each session is doing right now)"),
+        "",
+      ];
+      sessions.forEach((session, index) => {
+        const marker = index === cursor ? "❯ " : "  ";
+        const row = sessionRow(session.entry, 96, nowMs);
+        lines.push(theme.fg(index === cursor ? "text" : "muted", `${marker}${row}`));
+      });
+      if (sessions.length === 0) {
+        lines.push(theme.fg("dim", "no TAKT sessions yet — start one with /takt:start or /takt:exec"));
+      }
+      text.setText(lines.join("\n"));
+      text.invalidate();
+    };
+    refresh();
+
+    const timer = setInterval(() => refresh(), 1000);
+    timer.unref?.();
+    return {
+      render: (width: number) => text.render(width),
+      invalidate: () => text.invalidate(),
+      handleInput: (data: string) => {
+        if (matchesKey(data, "escape")) {
+          clearInterval(timer);
+          done();
+          return;
+        }
+        if (matchesKey(data, "enter")) {
+          clearInterval(timer);
+          const session = sessions[cursor];
+          if (session) {
+            void openLiveScreenOverlay(context, session.project);
+          }
+          done();
+          return;
+        }
+        if (matchesKey(data, "up")) {
+          cursor = Math.max(0, cursor - 1);
+          refresh();
+          return;
+        }
+        if (matchesKey(data, "down")) {
+          cursor = Math.min(Math.max(0, sessions.length - 1), cursor + 1);
+          refresh();
+        }
+      },
+    };
+  }, { overlay: true });
 }
 
 /** Esc-closable raw screen overlay; the default widget stays summary-only. */
@@ -2746,7 +2852,14 @@ export default function register(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerCommand("takt:flush", {
+  pi.registerCommand("takt:inspect", {
+    description: "Live session inspector: see and pick what each TAKT session is doing",
+    handler: async (_args, _context) => {
+      await runtime?.inspectSessions();
+    },
+  });
+
+pi.registerCommand("takt:flush", {
     description: "Flush queued input lines into the running TAKT session",
     handler: async (args, _context) => {
       await runtime?.flushQueuedInputs(args);

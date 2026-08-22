@@ -12,6 +12,9 @@
   from rows entirely (the elapsed clock covers timing), and project-defined
   workflow names stay visible.
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
+- Add `/takt:inspect`, a live session inspector: arrow through running
+  sessions, see what each is doing right now (step, workers, elapsed,
+  heartbeat, queued depth), and Enter to peek its raw screen.
 - Keep `Ctrl+Alt+T` working while takt focus owns the terminal: the raw-input
   interceptor recognizes the shortcut encoding, cycles the mode locally, and
   forwards every other byte unchanged.

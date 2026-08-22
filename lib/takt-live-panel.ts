@@ -275,7 +275,7 @@ function headerLine(projects: readonly TaktProjectWidgetEntry[]): string {
 }
 
 /** One compact row per session: spinner + status emoji + label + run state. */
-function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number): string {
+export function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number): string {
   void width;
   const run = findActiveRun(project.summary);
   const hb = heartbeat(run, project.runner?.lastOutputAt, now);
@@ -337,7 +337,7 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   return `✅ ${project.label}${workflowTag} — ${t("doneState")}${duration ? ` · ${duration}` : ""}`;
 }
 
-function describeActiveRun(run: TaktRunSnapshot): string {
+export function describeActiveRun(run: TaktRunSnapshot): string {
   const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
   const currentIndex = run.currentStep ? steps.indexOf(run.currentStep) : -1;
   const position = currentIndex >= 0 ? ` ${currentIndex + 1}/${steps.length}` : "";
