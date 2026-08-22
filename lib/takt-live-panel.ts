@@ -12,6 +12,7 @@ import {
   type TaktInputMode,
 } from "./takt-input-mode.ts";
 import { workflowLabel } from "./takt-progress.ts";
+import { t, taktLang } from "./takt-i18n.ts";
 import {
   hasTaktSummaryActivity,
   type TaktRunSnapshot,
@@ -246,13 +247,13 @@ export function renderTaktProjectStack(
   if (visibleProjects.length === 0) {
     return fitTaktWidgetLines([
       `input: ${formatTaktInputModeLine(inputMode)}`,
-      "🎭 TAKT · no active sessions",
+      t("noActiveSessions"),
     ], columns);
   }
 
   const lines: string[] = [
     `input: ${formatTaktInputModeLine(inputMode)}`,
-    `🎭 TAKT · ${visibleProjects.length} session${visibleProjects.length === 1 ? "" : "s"} · ${summaryCounts(visibleProjects)}`,
+    headerLine(visibleProjects),
   ];
   for (const project of visibleProjects) {
     if (lines.length >= MAX_STACK_ROWS - 1 && visibleProjects.indexOf(project) < visibleProjects.length - 1) {
@@ -262,6 +263,13 @@ export function renderTaktProjectStack(
     lines.push(sessionRow(project, columns, now));
   }
   return fitTaktWidgetLines(lines, columns);
+}
+
+/** Localized header: session count plus plain-word running/done detail. */
+function headerLine(projects: readonly TaktProjectWidgetEntry[]): string {
+  const count = projects.length;
+  const plural = taktLang() === "ja" ? "" : count === 1 ? "" : "s";
+  return t("headerSessions", { count, plural, detail: summaryCounts(projects) });
 }
 
 /** One compact row per session: spinner + status emoji + label + run state. */
@@ -276,26 +284,26 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
   // Bridge lifecycle states that precede or wrap the actual TAKT run.
   if (project.stage === "clearing") {
-    return `${spin} 🟡 ${project.label}${workflowTag} — clearing previous session`;
+    return `${spin} 🟡 ${project.label}${workflowTag} — ${t("clearingStep")}`;
   }
   if (project.stage === "starting" || isPreparingProject(project)) {
-    return `${spin} ⏳ ${project.label}${workflowTag} — starting…`;
+    return `${spin} ⏳ ${project.label}${workflowTag} — ${t("startingStep")}`;
   }
   if (project.stage === "waiting_prompt") {
-    return `${spin} ⏳ ${project.label}${workflowTag} — waiting for prompt`;
+    return `${spin} ⏳ ${project.label}${workflowTag} — ${t("waitingPromptStep")}`;
   }
   if (project.stage === "pasting") {
     const chars = project.promptPreview?.length ?? 0;
-    return `${spin} 📋 ${project.label}${workflowTag} — pasting prompt (${chars} chars)`;
+    return `${spin} 📋 ${project.label}${workflowTag} — ${t("pastingPromptStep", { chars })}`;
   }
   if (project.stage === "sending_go") {
-    return `${spin} 📨 ${project.label}${workflowTag} — sending /go`;
+    return `${spin} 📨 ${project.label}${workflowTag} — ${t("sendingGoStep")}`;
   }
 
   const failureText = run?.failure ?? run?.reason;
   if (run?.status === "stale" || run?.sessionStatus === "stale") {
     const detail = failureText ? ` · ${truncateInline(failureText, 40)}` : "";
-    return `${spin} ⚠️  ${project.label}${workflowTag} — stale${detail}`;
+    return `${spin} ⚠️  ${project.label}${workflowTag} — ${t("staleState")}${detail}`;
   }
 
   if (run && isActiveRunState(run)) {
@@ -306,19 +314,19 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
 
   if (project.stage === "failed") {
     const detail = failureText ? ` · ${truncateInline(failureText, 44)}` : "";
-    return `🔴 ${project.label}${workflowTag} ❌ failed${detail}`;
+    return `🔴 ${project.label}${workflowTag} ❌ ${t("failedState")}${detail}`;
   }
 
   // Running without run metadata yet (or right after a lifecycle transition).
   if (project.runner?.isRunning) {
-    return `${spin} 🟢 ${project.label}${workflowTag} — working`;
+    return `${spin} 🟢 ${project.label}${workflowTag} — ${t("workingState")}`;
   }
 
   const finishedRun = project.summary?.runs.find((candidate) => candidate.status === "completed");
   const duration = finishedRun?.startTime && finishedRun?.endTime
     ? formatDuration(Date.parse(finishedRun.startTime), Date.parse(finishedRun.endTime))
     : undefined;
-  return `✅ ${project.label}${workflowTag} — done${duration ? ` · ${duration}` : ""}`;
+  return `✅ ${project.label}${workflowTag} — ${t("doneState")}${duration ? ` · ${duration}` : ""}`;
 }
 
 function describeActiveRun(run: TaktRunSnapshot): string {
@@ -403,9 +411,9 @@ function summaryCounts(projects: readonly TaktProjectWidgetEntry[]): string {
     else done += 1;
   }
   const parts: string[] = [];
-  if (running > 0) parts.push(`${running} running`);
-  if (done > 0) parts.push(`${done} done`);
-  return parts.length > 0 ? parts.join(" · ") : "starting";
+  if (running > 0) parts.push(t("runningCount", { n: running }));
+  if (done > 0) parts.push(t("doneCount", { n: done }));
+  return parts.length > 0 ? parts.join(" · ") : t("startingCount");
 }
 
 function isPreparingProject(project: TaktProjectWidgetEntry): boolean {

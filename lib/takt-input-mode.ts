@@ -1,3 +1,5 @@
+import { t } from "./takt-i18n.ts";
+
 export const TAKT_INPUT_MODES = ["pi", "takt", "pi-auto"] as const;
 
 export type TaktInputMode = (typeof TAKT_INPUT_MODES)[number];
@@ -31,11 +33,11 @@ export function formatTaktInputModeLine(mode: TaktInputMode): string {
   // Zero jargon: the line must answer "who is typing right now?" by itself.
   switch (mode) {
     case "pi":
-      return "⌨️ You are typing in Pi · TAKT runs beside you · Ctrl+Alt+T switches";
+      return t("modePi");
     case "takt":
-      return "⌨️ You are typing into TAKT · Esc returns to Pi";
+      return t("modeTakt");
     case "pi-auto":
-      return "🤖 Autopilot on — Pi watches TAKT and answers follow-ups";
+      return t("modeAuto");
   }
 }
 

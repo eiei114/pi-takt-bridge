@@ -45,6 +45,7 @@ pi -e C:/path/to/pi-takt-marionette/extensions/index.ts
 | `/takt` | Start or attach to the live TAKT widget |
 | `/takt:live [path]` | Peek a session's raw TAKT screen (Esc closes) |
 | `/takt:sessions` | List TAKT sessions with status and pick one to peek |
+| `/takt:lang [en|ja]` | Switch widget language for this session (no argument toggles) |
 | `/takt:enqueue [path]` | Ask TAKT ACP to add a worktree task in a selected folder |
 | `/takt:project [path]` | Register another repo/folder for detection and stacked display |
 | `/takt:project:init [profile]` | Create project-local `.takt` scaffolding and register a profile |

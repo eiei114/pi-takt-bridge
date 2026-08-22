@@ -69,6 +69,7 @@ import {
 } from "../lib/takt-runtime-yaml.ts";
 import { formatPiModelRef, listPiModels } from "../lib/takt-pi-models.ts";
 import { SearchableListController } from "../lib/takt-search-select.ts";
+import { setTaktLang, taktLang, toggleTaktLang, type TaktLang } from "../lib/takt-i18n.ts";
 
 const WIDGET_KEY = "pi-takt-marionette-projects";
 const STATUS_KEY = "pi-takt-marionette-input-mode";
@@ -1701,6 +1702,30 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
   }
 
+  /** /takt:lang [en|ja] — switch widget UI language for this session. */
+  async setWidgetLanguage(args = ""): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    const arg = args.trim().toLowerCase();
+    let lang: TaktLang;
+    if (arg === "") {
+      lang = toggleTaktLang();
+    } else if (arg === "ja" || arg === "ja-jp" || arg.includes("日本語")) {
+      lang = setTaktLang("ja");
+    } else if (arg === "en" || arg === "en-us" || arg.includes("english")) {
+      lang = setTaktLang("en");
+    } else {
+      context.ui.notify("Usage: /takt:lang [en|ja] (no argument toggles).", "info");
+      return;
+    }
+    const sample = lang === "ja"
+      ? "🎭 言語を日本語に切り替えました（このセッションのみ）"
+      : "🎭 Language switched to English (this session only)";
+    context.ui.notify(sample, "info");
+  }
+
   /**
    * Explicit raw-screen access: /takt:live [path] and /takt:sessions both land
    * here. The stacked widget stays summary-only by default.
@@ -2630,6 +2655,13 @@ export default function register(pi: ExtensionAPI): void {
     description: "Peek the raw TAKT screen of a session (Esc to close)",
     handler: async (args, _context) => {
       await runtime?.peekSession(args);
+    },
+  });
+
+  pi.registerCommand("takt:lang", {
+    description: "Switch widget language: en | ja (no argument toggles)",
+    handler: async (args, _context) => {
+      await runtime?.setWidgetLanguage(args);
     },
   });
 

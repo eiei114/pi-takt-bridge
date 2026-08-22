@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add `/takt:lang`-style language switching: `/takt:lang [en|ja]` toggles or
+  sets the widget UI language per session; English stays the default and the
+  input line, header counts, and session-row states are all localized.
 - Make the widget self-explanatory at a glance: the input line speaks without
   jargon ("⌨️ You are typing in Pi", "🤖 Autopilot on — Pi watches TAKT"),
   the header reads `N sessions · X running · Y done` instead of the
