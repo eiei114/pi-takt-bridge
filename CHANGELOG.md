@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
+- Add an activity heartbeat and live elapsed clock to active rows: spinner
+  speed follows real TAKT output (fast when writing, slowing when quiet,
+  ⚠️ after ~30s of silence), and rows tick a `⏱ mm:ss` timer from run start.
 - Cap workflow names in session rows to 22 characters so auto-generated exec
   slugs no longer truncate the rest of the line.
 - Rename the package and repository to `pi-takt-marionette` (npm was never

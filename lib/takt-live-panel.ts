@@ -28,15 +28,65 @@ const SPINNER_INTERVAL_MS = 120;
 /** Braille spinner shown on actively operated sessions; still means alive. */
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
-export function taktSpinnerFrame(nowMs: number): string {
+export function taktSpinnerFrame(nowMs: number, intervalMs = SPINNER_INTERVAL_MS): string {
   const safeNow = Number.isFinite(nowMs) ? Math.max(0, nowMs) : 0;
-  return SPINNER_FRAMES[Math.floor(safeNow / SPINNER_INTERVAL_MS) % SPINNER_FRAMES.length];
+  const safeInterval = Math.max(40, intervalMs);
+  return SPINNER_FRAMES[Math.floor(safeNow / safeInterval) % SPINNER_FRAMES.length];
+}
+
+const HEARTBEAT_FRESH_MS = 10_000;
+const HEARTBEAT_STALLED_MS = 30_000;
+
+/**
+ * Heartbeat tiers: fresh TAKT writes spin fast, a quiet stretch slows the
+ * rotation, and a long silent gap flags the session as possibly stuck.
+ */
+export function heartbeat(
+  run: Pick<TaktRunSnapshot, "updatedAt"> | undefined,
+  runnerLastOutputAt: number | undefined,
+  nowMs: number,
+): { intervalMs: number; stalled: boolean } {
+  const candidates = [runnerLastOutputAt, run?.updatedAt !== undefined ? Date.parse(run.updatedAt) : undefined]
+    .filter((value): value is number => value !== undefined && Number.isFinite(value));
+  const activityAt = Math.max(...candidates, Number.NEGATIVE_INFINITY);
+  if (!Number.isFinite(activityAt)) {
+    return { intervalMs: SPINNER_INTERVAL_MS, stalled: false };
+  }
+  const age = Math.max(0, nowMs - activityAt);
+  if (age >= HEARTBEAT_STALLED_MS) {
+    return { intervalMs: 480, stalled: true };
+  }
+  if (age >= HEARTBEAT_FRESH_MS) {
+    return { intervalMs: 240, stalled: false };
+  }
+  return { intervalMs: SPINNER_INTERVAL_MS, stalled: false };
+}
+
+/** Live elapsed clock for an actively operated run, e.g. `⏱04:32`. */
+export function formatElapsed(startIso: string | undefined, nowMs: number): string {
+  if (startIso === undefined) {
+    return "";
+  }
+  const start = Date.parse(startIso);
+  if (!Number.isFinite(start)) {
+    return "";
+  }
+  let totalSeconds = Math.max(0, Math.floor((nowMs - start) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  totalSeconds -= hours * 3600;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  const mm = String(minutes).padStart(2, "0");
+  const body = `${mm}:${String(seconds).padStart(2, "0")}`;
+  return hours > 0 ? `⏱ ${hours}:${body}` : `⏱ ${body}`;
 }
 
 export interface TaktLiveRunner {
   readonly terminal: Terminal | undefined;
   readonly hasSession: boolean;
   readonly isRunning: boolean;
+  /** Timestamp of the most recent PTY output; drives the heartbeat spinner. */
+  readonly lastOutputAt?: number;
   resize(columns: number, rows: number): void;
   subscribe(listener: () => void): () => void;
 }
@@ -217,8 +267,9 @@ export function renderTaktProjectStack(
 /** One compact row per session: spinner + status emoji + label + run state. */
 function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number): string {
   void width;
-  const spin = taktSpinnerFrame(now);
   const run = findActiveRun(project.summary);
+  const hb = heartbeat(run, project.runner?.lastOutputAt, now);
+  const spin = taktSpinnerFrame(now, hb.intervalMs);
   // Auto-generated exec workflow names get long; cap them so the row stays readable.
   const workflow = run !== undefined ? truncateInline(workflowLabel(run), 22) : undefined;
   const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
@@ -247,7 +298,9 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   }
 
   if (run && isActiveRunState(run)) {
-    return `${spin} 🟢 ${project.label}${workflowTag} ${describeActiveRun(run)}`;
+    const elapsed = formatElapsed(run.startTime, now);
+    const dot = hb.stalled ? "⚠️" : "🟢";
+    return `${spin} ${dot} ${project.label}${workflowTag} ${describeActiveRun(run)}${elapsed ? ` · ${elapsed}` : ""}`;
   }
 
   if (project.stage === "failed") {

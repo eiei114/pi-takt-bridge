@@ -99,6 +99,7 @@ export class TaktRunController {
   private lastExitResult: TaktExitResult | undefined;
   private lastPid: number | undefined;
   private outputVersion = 0;
+  private lastOutputAtValue: number | undefined;
   private sessionStatus: TaktSessionStatus = "unknown";
   private readonly options: TaktRunControllerOptions;
   private readonly interrupt: InterruptPty;
@@ -137,6 +138,11 @@ export class TaktRunController {
 
   get screenVersion(): number {
     return this.outputVersion;
+  }
+
+  /** Timestamp of the most recent PTY output; the heartbeat signal for liveness. */
+  get lastOutputAt(): number | undefined {
+    return this.lastOutputAtValue;
   }
 
   subscribe(listener: () => void): () => void {
@@ -211,6 +217,7 @@ export class TaktRunController {
     pty.onData((data) => {
       terminal.write(data, () => {
         this.outputVersion += 1;
+        this.lastOutputAtValue = Date.now();
         this.notifyScreenChange();
       });
     });

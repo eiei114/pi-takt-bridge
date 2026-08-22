@@ -373,3 +373,80 @@ test("project stack truncates long auto-generated workflow names in rows", () =>
 
 
 
+
+test("heartbeat spinner slows on stale activity and flags possible stalls", async () => {
+  const { renderTaktProjectStack } = await import("../lib/takt-live-panel.ts");
+  const now = Date.parse("2026-08-20T00:01:00.000Z");
+  const baseRunner = {
+    terminal: undefined,
+    hasSession: true,
+    isRunning: true,
+    resize() {},
+  };
+  const makeSummary = (updatedAt) => ({
+    cwd: "C:/pg",
+    status: "live",
+    running: 1,
+    pending: 0,
+    blocked: 0,
+    failed: 0,
+    completed: 0,
+    stale: 0,
+    runs: [{
+      slug: "r",
+      task: "t",
+      workflow: "trial",
+      status: "running",
+      sessionStatus: "live",
+      currentStep: "implement",
+      updatedAt,
+    }],
+  });
+
+  // Fresh output (5s ago) → normal 🟢 row.
+  const fresh = renderTaktProjectStack([
+    { id: "a", label: "pg", cwd: "C:/pg", runner: baseRunner, stage: "running",
+      summary: makeSummary(new Date(now - 5_000).toISOString()) },
+  ], 80, "pi", { now });
+  assert.ok(fresh.some((line) => line.includes("🟢 pg")));
+
+  // Silent for 40s → ⚠️ stall flag replaces the green dot.
+  const stalled = renderTaktProjectStack([
+    { id: "a", label: "pg", cwd: "C:/pg", runner: baseRunner, stage: "running",
+      summary: makeSummary(new Date(now - 40_000).toISOString()) },
+  ], 80, "pi", { now });
+  assert.ok(stalled.some((line) => line.includes("⚠️") && line.includes("pg")));
+  assert.ok(stalled.every((line) => !line.includes("🟢 pg")));
+});
+
+test("active rows tick a live elapsed timer from run start", () => {
+  const now = Date.parse("2026-08-20T00:04:32.000Z");
+  const lines = renderTaktProjectStack([{
+    id: "a",
+    label: "pg",
+    cwd: "C:/pg",
+    runner: { terminal: undefined, hasSession: true, isRunning: true, resize() {} },
+    stage: "running",
+    summary: {
+      cwd: "C:/pg",
+      status: "live",
+      running: 1,
+      pending: 0,
+      blocked: 0,
+      failed: 0,
+      completed: 0,
+      stale: 0,
+      runs: [{
+        slug: "r",
+        task: "t",
+        workflow: "trial",
+        status: "running",
+        sessionStatus: "live",
+        startTime: new Date(now - 272_000).toISOString(),
+        currentStep: "draft",
+      }],
+    },
+  }], 80, "pi", { now });
+
+  assert.ok(lines.some((line) => line.includes("⏱ 04:32")));
+});

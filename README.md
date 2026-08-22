@@ -117,7 +117,10 @@ TAKT process launched from this Pi session, with the most active first —
 ✅ repo-b · default    done · 12m
 ```
 
-A rotating braille spinner means the session is actively operated; completed
+The heartbeat spinner spins at the speed of real TAKT output: fresh writes
+keep it fast, a quiet stretch slows it, and ~30s of silence flags the row with
+⚠️ as possibly stuck. Actively operated rows tick a live `⏱ mm:ss` elapsed
+clock from run start. Completed
 and failed sessions stop spinning (`✅` done, `🔴 … ❌ failed` plus an error
 snippet). Rows show discrete facts only — step position and parallel worker
 completion (w2/3) — instead of a synthetic progress bar. Raw PTY output is never shown by
