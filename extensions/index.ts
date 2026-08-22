@@ -377,26 +377,22 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
     const runtimeRef = this;
     if (typeof context.ui.addAutocompleteProvider !== "function") {
-      context.ui.notify("TAKT: addAutocompleteProvider unavailable; @ mention skipped.", "info");
       return;
     }
-    const knownCount = this.sessionCompletionEntries().length;
-    context.ui.notify(
-      `TAKT @ mention registered (${knownCount} session(s) eligible).`,
-      "info",
-    );
     context.ui.addAutocompleteProvider((current) => ({
       triggerCharacters: ["@"],
       async getSuggestions(lines, cursorLine, cursorCol, options) {
         const line = lines[cursorLine] ?? "";
         const beforeCursor = line.slice(0, cursorCol);
         const match = /(?:^|[ 	])@([^\s@]*)$/.exec(beforeCursor);
+        const builtIn = await current.getSuggestions(lines, cursorLine, cursorCol, options);
         if (match === null) {
-          return current.getSuggestions(lines, cursorLine, cursorCol, options);
+          return builtIn;
         }
         const query = (match[1] ?? "").toLocaleLowerCase();
-        const items = runtimeRef.sessionCompletionEntries()
+        const sessionItems = runtimeRef.sessionCompletionEntries()
           .filter((entry) =>
+            query.length === 0 ||
             entry.label.toLocaleLowerCase().includes(query) ||
             entry.cwd.toLocaleLowerCase().includes(query))
           .slice(0, 8)
@@ -405,11 +401,17 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
             label: `@${entry.label}`,
             description: `TAKT session · ${entry.cwd}`,
           }));
-        if (items.length > 0) {
-          return { prefix: `@${query}`, items };
+        if (sessionItems.length === 0) {
+          return builtIn;
         }
-        // No matching session: keep the existing file/path mention behavior intact.
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        // TAKT sessions lead the list; file/path mentions stay underneath.
+        const fileItems = (builtIn?.items ?? []).filter(
+          (item) => !(item.value ?? "").startsWith("@"),
+        );
+        return {
+          prefix: builtIn?.prefix ?? match[1] ?? "",
+          items: [...sessionItems, ...fileItems],
+        };
       },
       shouldTriggerFileCompletion(lines, cursorLine, cursorCol) {
         return current.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
