@@ -45,6 +45,7 @@ pi -e C:/path/to/pi-takt-marionette/extensions/index.ts
 | `/takt` | Start or attach to the live TAKT widget |
 | `/takt:live [path]` | Peek a session's raw TAKT screen (Esc closes) |
 | `/takt:sessions` | List TAKT sessions with status and pick one to peek |
+| `/takt:flush [path]` | Send queued input lines to the running TAKT session |
 | `/takt:lang [en|ja]` | Switch widget language for this session (no argument toggles) |
 | `/takt:enqueue [path]` | Ask TAKT ACP to add a worktree task in a selected folder |
 | `/takt:project [path]` | Register another repo/folder for detection and stacked display |
@@ -103,7 +104,8 @@ After a session is live, dual input modes let you keep talking to TAKT without
 leaving Pi:
 
 - `pi` (default): editor stays on Pi; use `/takt:send` or tools
-- `takt`: keys go to the active bridge-owned PTY; switch back with `/takt:mode` or Ctrl+Alt+T
+- `takt`: keys go to the active bridge-owned PTY; `Ctrl+Alt+T` still cycles modes (intercepted before TAKT sees it), or use `/takt:mode`
+- Input typed while a workflow is executing is queued (`⏳q3` on the row) and flushed automatically when the session is ready, or via `/takt:flush`
 - `pi-auto`: entered automatically after a successful `takt_exec_prompt`; Pi can
   inspect with `takt_read_screen` and send follow-ups with `takt_send_input`
   (destructive input still confirms)

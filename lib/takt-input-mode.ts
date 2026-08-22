@@ -67,3 +67,15 @@ export function isDestructiveTaktAutoInput(text: string): boolean {
   }
   return DESTRUCTIVE_AUTO_INPUT.test(trimmed);
 }
+
+/**
+ * Raw terminal encodings of Ctrl+Alt+T that reach the extension interceptor:
+ * the classic ESC-prefixed control byte (ESC + 0x14) and CSI-u variants
+ * (modifyOtherKeys / Kitty) some terminals emit instead.
+ */
+export function isCtrlAltTSequence(data: string): boolean {
+  if (data === "\u001b\u0014") {
+    return true;
+  }
+  return /^\u001b\[(?:27;7t|20;7t|27;7u|20;7u)$/.test(data);
+}

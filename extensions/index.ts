@@ -68,7 +68,9 @@ import {
   type StepModelSelection,
 } from "../lib/takt-runtime-yaml.ts";
 import { formatPiModelRef, listPiModels } from "../lib/takt-pi-models.ts";
+import { isCtrlAltTSequence } from "../lib/takt-input-mode.ts";
 import { SearchableListController } from "../lib/takt-search-select.ts";
+import { createTaktInputQueue, type TaktInputQueue } from "../lib/takt-input-queue.ts";
 import { setTaktLang, taktLang, toggleTaktLang, type TaktLang } from "../lib/takt-i18n.ts";
 
 const WIDGET_KEY = "pi-takt-marionette-projects";
@@ -231,6 +233,7 @@ interface ManagedProject {
   stage: TaktExecStage;
   promptPreview?: string;
   execTracking?: TaktExecTracking;
+  queuedInputs?: TaktInputQueue;
 }
 
 interface TaktExecTracking {
@@ -269,6 +272,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       summary: project.summary,
       stage: project.stage,
       promptPreview: project.promptPreview,
+      queueDepth: project.queuedInputs?.depth() ?? 0,
     }));
   }
 
@@ -581,6 +585,14 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
     const text = await context.ui.editor(`Input for ${project.label}`, "");
     if (text === undefined || !text.trim()) {
+      return;
+    }
+    if (project.stage === "running") {
+      const depth = project.queuedInputs?.enqueue(text) ?? 0;
+      context.ui.notify(
+        `⏳ TAKT ${project.label} is executing; input queued (⏳q${depth}). It flushes when the session is ready, or via /taktn:flush.`.replace("/taktn:", "/takt:"),
+        "info",
+      );
       return;
     }
     if (containsTaktGoCommand(text)) {
@@ -1463,9 +1475,61 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       onUpdate?.(message);
     }
     this.notifyProjects();
+    if (stage === "waiting_prompt") {
+      this.flushQueuedInputsFor(project, { auto: true });
+    }
     if (stage === "stopped" || stage === "completed" || stage === "failed") {
+      project.queuedInputs?.clearAll();
       void this.showLive(false);
     }
+  }
+
+  /**
+   * Send queued input lines in order as one bracket-pasted batch. Destructive
+   * entries never auto-send: they stay queued with a notification instead.
+   */
+  private flushQueuedInputsFor(
+    project: ManagedProject,
+    options: { auto?: boolean; force?: boolean } = {},
+  ): void {
+    const queue = project.queuedInputs;
+    if (queue === undefined || !project.runner.isRunning) {
+      return;
+    }
+    if (!project.runner.hasSession) {
+      return;
+    }
+    const result = queue.takeBatch();
+    if (result.batch !== undefined) {
+      project.runner.write(formatTaktPastedInput(result.batch));
+      this.context?.ui.notify(
+        `⏳ Flushed ${result.sentCount} queued line(s) to TAKT ${project.label}${options.auto ? " (session ready)" : ""}.`,
+        "info",
+      );
+    }
+    if (result.heldDestructive > 0) {
+      this.context?.ui.notify(
+        `⚠️ ${result.heldDestructive} destructive queued line(s) held back in ${project.label}; confirm via /taktn:flush.`.replace("/taktn:", "/takt:"),
+        "warning",
+      );
+    }
+  }
+
+  async flushQueuedInputs(args = ""): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    const project = await this.selectProject(
+      args,
+      "Flush queued input to",
+      (candidate) => candidate.runner.isRunning,
+    );
+    if (!project?.runner.isRunning) {
+      context.ui.notify("No running bridge-owned TAKT session to flush into.", "info");
+      return;
+    }
+    this.flushQueuedInputsFor(project, { force: true });
   }
 
   async shutdown(): Promise<void> {
@@ -1516,6 +1580,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
 
     const label = normalized.split(/[\\/]/).filter(Boolean).at(-1) ?? normalized;
     const acp = new TaktAcpClient({ cwd: normalized });
+    const queuedInputs = createTaktInputQueue();
     const runner = new TaktRunController({
       cwd: normalized,
       onExit: ({ code }) => {
@@ -1550,6 +1615,7 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
       acp,
       runner,
       stage: "idle",
+      queuedInputs,
     };
     runner.subscribe(() => this.notifyProjects());
     this.projects.set(id, project);
@@ -1811,8 +1877,25 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   private handleTaktFocusInput(data: string): { consume: boolean } {
-    // Esc no longer bails out of takt focus: switching is command/shortcut
-    // territory (/takt:mode or Ctrl+Alt+T), so stray Esc reaches TAKT itself.
+    // Keep the mode-cycle shortcut alive while takt focus owns the PTY:
+    // intercept Ctrl+Alt+T before forwarding so the user is never locked out.
+    if (matchesKey(data, Key.ctrlAlt("t")) || isCtrlAltTSequence(data)) {
+      void this.cycleInputMode();
+      return { consume: true };
+    }
+
+    const activeForQueue = this.activeRunningProject();
+    if (
+      activeForQueue?.stage === "running" &&
+      !data.startsWith("\u001b") &&
+      data !== "\r" &&
+      data !== "\n"
+    ) {
+      // Workflow mid-execution: buffer printable keystrokes instead of letting
+      // them vanish into the running TAKT process.
+      activeForQueue.queuedInputs?.enqueue(data);
+      return { consume: true };
+    }
 
     const project = this.activeRunningProject();
     if (!project) {
@@ -2660,6 +2743,13 @@ export default function register(pi: ExtensionAPI): void {
     description: "Switch widget language: en | ja (no argument toggles)",
     handler: async (args, _context) => {
       await runtime?.setWidgetLanguage(args);
+    },
+  });
+
+  pi.registerCommand("takt:flush", {
+    description: "Flush queued input lines into the running TAKT session",
+    handler: async (args, _context) => {
+      await runtime?.flushQueuedInputs(args);
     },
   });
 

@@ -12,6 +12,12 @@
   from rows entirely (the elapsed clock covers timing), and project-defined
   workflow names stay visible.
 - Drop the run-level progress meter: rows keep discrete step position and worker completion only.
+- Keep `Ctrl+Alt+T` working while takt focus owns the terminal: the raw-input
+  interceptor recognizes the shortcut encoding, cycles the mode locally, and
+  forwards every other byte unchanged.
+- Queue input typed while a workflow is executing instead of dropping it: rows
+  show `⏳q<N>`, the buffer flushes automatically when the session is ready
+  or via `/takt:flush`, and destructive lines are held back for confirmation.
 - Add an activity heartbeat and live elapsed clock to active rows: spinner
   speed follows real TAKT output (fast when writing, slowing when quiet,
   ⚠️ after ~30s of silence), and rows tick a `⏱ mm:ss` timer from run start.

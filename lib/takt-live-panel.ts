@@ -101,6 +101,8 @@ export interface TaktProjectWidgetEntry {
   summary?: TaktSummary;
   stage?: TaktExecStage;
   promptPreview?: string;
+  /** Lines buffered because the session was mid-execution when they were typed. */
+  queueDepth?: number;
 }
 
 export interface TaktProjectStackSource {
@@ -312,7 +314,10 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   if (run && isActiveRunState(run)) {
     const elapsed = formatElapsed(run.startTime, now);
     const dot = hb.stalled ? "⚠️" : "🟢";
-    return `${spin} ${dot} ${project.label}${workflowTag} ${describeActiveRun(run)}${elapsed ? ` · ${elapsed}` : ""}`;
+    const queued = project.queueDepth !== undefined && project.queueDepth > 0
+      ? ` ⏳q${project.queueDepth}`
+      : "";
+    return `${spin} ${dot} ${project.label}${workflowTag} ${describeActiveRun(run)}${queued}${elapsed ? ` · ${elapsed}` : ""}`;
   }
 
   if (project.stage === "failed") {

@@ -163,6 +163,15 @@ raw PTY. Such external activity never renders in the live widget automatically;
 inspect it explicitly with `/takt:status [path]` or `takt_read_screen`, and Pi
 still never kills it.
 
+## Queued input while executing
+
+Input typed while the workflow is executing no longer vanishes. Lines from
+`/takt:send`, pi-mode submits, or takt-focus keystrokes are buffered per
+project and shown as `⏳q<N>` on the session row. When the session reaches a
+prompt again the buffer flushes as one ordered batch (`/takt:flush` forces it
+early). Destructive lines (`/clear`, `rm -rf`, ...) are never auto-sent: they
+stay queued behind a warning until confirmed.
+
 ## Interactive `takt exec`
 
 `/takt:clear [path]` optionally clears the previous project exec session first.
@@ -186,7 +195,7 @@ Cycle with `Ctrl+Alt+T` or `/takt:mode`:
 | Mode | Behavior |
 |---|---|
 | `pi` | Default. Pi keeps editor focus. Use `/takt:send` or `takt_exec_prompt`. |
-| `takt` | Human keys go to the active bridge-owned TAKT PTY. Switch back with `/takt:mode` or Ctrl+Alt+T. |
+| `takt` | Human keys go to the active bridge-owned TAKT PTY. `Ctrl+Alt+T` is intercepted before TAKT sees it, so mode cycling keeps working; `/takt:mode` also switches. |
 | `pi-auto` | Pi may call `takt_read_screen` / `takt_send_input` for short follow-ups. |
 
 `takt_exec_prompt` enters `pi-auto` automatically after a successful submit.

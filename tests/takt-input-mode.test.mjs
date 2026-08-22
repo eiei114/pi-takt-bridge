@@ -33,3 +33,12 @@ test("isDestructiveTaktAutoInput gates clear/stop style follow-ups", () => {
   assert.equal(isDestructiveTaktAutoInput("please takt clear"), true);
   assert.equal(isDestructiveTaktAutoInput("abort\u0003"), true);
 });
+
+test("isCtrlAltTSequence recognises raw shortcut encodings and rejects other bytes", async () => {
+  const { isCtrlAltTSequence } = await import("../lib/takt-input-mode.ts");
+  assert.equal(isCtrlAltTSequence("\u001b\u0014"), true); // ESC + Ctrl+T
+  assert.equal(isCtrlAltTSequence("\u001b[27;7t"), true); // modifyOtherKeys CSI-t
+  assert.equal(isCtrlAltTSequence("\u001b[20;7u"), true); // Kitty CSI-u
+  assert.equal(isCtrlAltTSequence("\u001b[B"), false); // plain down arrow
+  assert.equal(isCtrlAltTSequence("x"), false);
+});
