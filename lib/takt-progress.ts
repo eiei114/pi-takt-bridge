@@ -126,7 +126,7 @@ function isActiveRun(run: TaktRunSnapshot): boolean {
 }
 
 /** Mark workflows resolved from TAKT's built-in set so project-defined names stay distinguishable. */
-function workflowLabel(run: Pick<TaktRunSnapshot, "workflow" | "workflowSource">): string {
+export function workflowLabel(run: Pick<TaktRunSnapshot, "workflow" | "workflowSource">): string {
   const normalized = run.workflow.trim().replaceAll(/\s+/g, " ");
   if (normalized.length === 0) {
     return "workflow";

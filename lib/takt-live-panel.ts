@@ -5,15 +5,13 @@ import {
 } from "@earendil-works/pi-tui";
 import type { Terminal } from "@xterm/headless";
 import {
-  formatTaktExecStage,
-  shouldOverlayPromptPreview,
   type TaktExecStage,
 } from "./takt-exec-stage.ts";
 import {
   formatTaktInputModeLine,
   type TaktInputMode,
 } from "./takt-input-mode.ts";
-import { renderTaktWorkflowProgress } from "./takt-progress.ts";
+import { workflowLabel } from "./takt-progress.ts";
 import {
   hasTaktSummaryActivity,
   type TaktRunSnapshot,
@@ -23,9 +21,17 @@ import {
 const DEFAULT_COLUMNS = 120;
 const DEFAULT_ROWS = 30;
 const MAX_WIDGET_ROWS = 10;
-const MAX_PROJECT_ROWS = 8;
 const MAX_STACK_ROWS = 30;
 const LIVE_WIDGET_REFRESH_INTERVAL_MS = 100;
+const SPINNER_INTERVAL_MS = 120;
+
+/** Braille spinner shown on actively operated sessions; still means alive. */
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+export function taktSpinnerFrame(nowMs: number): string {
+  const safeNow = Number.isFinite(nowMs) ? Math.max(0, nowMs) : 0;
+  return SPINNER_FRAMES[Math.floor(safeNow / SPINNER_INTERVAL_MS) % SPINNER_FRAMES.length];
+}
 
 export interface TaktLiveRunner {
   readonly terminal: Terminal | undefined;
@@ -176,7 +182,8 @@ export function renderTaktProjectStack(
   const now = options.now ?? Date.now();
   // The live widget is a session-owned view: only projects whose TAKT process
   // was launched from THIS Pi session render here. External activity stays
-  // available through explicit diagnostics (/takt:status, takt_read_screen).
+  // available through explicit diagnostics (/takt:status, /takt:sessions,
+  // takt_read_screen).
   const displayableProjects = [...projects]
     .filter(hasOwnedRunner)
     .filter((project) => isDisplayableProject(project, now))
@@ -185,56 +192,115 @@ export function renderTaktProjectStack(
   const visibleProjects = currentIsPreparing
     ? displayableProjects.filter((project) => project.isCurrent)
     : displayableProjects;
-  const lines: string[] = [`input: ${formatTaktInputModeLine(inputMode)}`];
-  let shownProjects = 0;
-
-  for (const project of visibleProjects) {
-    const runner = project.runner;
-    const progress = renderTaktWorkflowProgress({
-      run: findActiveRun(project.summary),
-      bridgeStage: project.stage,
-      width: columns,
-    });
-    const panel = [projectHeader(project)];
-    if (shouldOverlayPromptPreview(project.stage) && project.promptPreview) {
-      panel.push(...renderPromptOverlay(project, progress));
-    } else if (isPreparingProject(project)) {
-      panel.push(progress ?? "preparing for TAKT activity...");
-    } else if (runner?.terminal) {
-      runner.resize(columns, terminalRows());
-      if (progress) {
-        panel.push(progress);
-      }
-      panel.push(...visibleWidgetLines(
-        renderTaktTerminal(runner.terminal),
-        Math.max(1, MAX_PROJECT_ROWS - panel.length),
-      ));
-    } else {
-      panel.push("waiting for TAKT activity...");
-    }
-
-    if (lines.length + panel.length > MAX_STACK_ROWS) {
-      break;
-    }
-    lines.push(...panel);
-    shownProjects += 1;
-  }
 
   if (visibleProjects.length === 0) {
     return fitTaktWidgetLines([
       `input: ${formatTaktInputModeLine(inputMode)}`,
-      "TAKT projects: no active sessions.",
+      "🎭 TAKT · no active strings",
     ], columns);
   }
-  if (shownProjects < visibleProjects.length) {
-    const more = `… ${visibleProjects.length - shownProjects} more TAKT projects`;
-    if (lines.length >= MAX_STACK_ROWS) {
-      lines[MAX_STACK_ROWS - 1] = more;
-    } else {
-      lines.push(more);
+
+  const lines: string[] = [
+    `input: ${formatTaktInputModeLine(inputMode)}`,
+    `🎭 TAKT · ${visibleProjects.length} string${visibleProjects.length === 1 ? "" : "s"}`,
+  ];
+  for (const project of visibleProjects) {
+    if (lines.length >= MAX_STACK_ROWS - 1 && visibleProjects.indexOf(project) < visibleProjects.length - 1) {
+      lines.push(`… ${visibleProjects.length - visibleProjects.indexOf(project)} more`);
+      break;
     }
+    lines.push(sessionRow(project, columns, now));
   }
   return fitTaktWidgetLines(lines, columns);
+}
+
+/** One compact row per session: spinner + status emoji + label + run state. */
+function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number): string {
+  void width;
+  const spin = taktSpinnerFrame(now);
+  const run = findActiveRun(project.summary);
+  const workflow = run !== undefined ? workflowLabel(run) : undefined;
+  const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
+
+  // Bridge lifecycle states that precede or wrap the actual TAKT run.
+  if (project.stage === "clearing") {
+    return `${spin} 🟡 ${project.label}${workflowTag} — clearing previous session`;
+  }
+  if (project.stage === "starting" || isPreparingProject(project)) {
+    return `${spin} ⏳ ${project.label}${workflowTag} — starting…`;
+  }
+  if (project.stage === "waiting_prompt") {
+    return `${spin} ⏳ ${project.label}${workflowTag} — waiting for prompt`;
+  }
+  if (project.stage === "pasting") {
+    const chars = project.promptPreview?.length ?? 0;
+    return `${spin} 📋 ${project.label}${workflowTag} — pasting prompt (${chars} chars)`;
+  }
+  if (project.stage === "sending_go") {
+    return `${spin} 📨 ${project.label}${workflowTag} — sending /go`;
+  }
+
+  const failureText = run?.failure ?? run?.reason;
+  if (run?.status === "stale" || run?.sessionStatus === "stale") {
+    const detail = failureText ? ` · ${truncateInline(failureText, 40)}` : "";
+    return `${spin} ⚠️  ${project.label}${workflowTag} — stale${detail}`;
+  }
+
+  if (run && isActiveRunState(run)) {
+    return `${spin} 🟢 ${project.label}${workflowTag} — ${describeActiveRun(run)}`;
+  }
+
+  if (project.stage === "failed") {
+    const detail = failureText ? ` · ${truncateInline(failureText, 44)}` : "";
+    return `🔴 ${project.label}${workflowTag} ❌ failed${detail}`;
+  }
+
+  // Running without run metadata yet (or right after a lifecycle transition).
+  if (project.runner?.isRunning) {
+    return `${spin} 🟢 ${project.label}${workflowTag} — working`;
+  }
+
+  const finishedRun = project.summary?.runs.find((candidate) => candidate.status === "completed");
+  const duration = finishedRun?.startTime && finishedRun?.endTime
+    ? formatDuration(Date.parse(finishedRun.startTime), Date.parse(finishedRun.endTime))
+    : undefined;
+  return `✅ ${project.label}${workflowTag} — done${duration ? ` · ${duration}` : ""}`;
+}
+
+function describeActiveRun(run: TaktRunSnapshot): string {
+  const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
+  const currentIndex = run.currentStep ? steps.indexOf(run.currentStep) : -1;
+  const position = currentIndex >= 0 ? ` ${currentIndex + 1}/${steps.length}` : "";
+  const phaseSuffix = run.phase
+    ? ` · p${run.phase}/3`
+    : "";
+  const iterationSuffix = run.currentIteration !== undefined ? ` i${run.currentIteration}` : "";
+  const stepName = run.currentStep ?? "working";
+  return `🔨 ${stepName}${position}${phaseSuffix}${iterationSuffix}`;
+}
+
+function truncateInline(value: string, maxLength: number): string {
+  const normalized = value.trim().replaceAll(/\s+/g, " ");
+  return normalized.length > maxLength ? `${normalized.slice(0, Math.max(1, maxLength - 1))}…` : normalized;
+}
+
+function formatDuration(startMs: number, endMs: number): string {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return "";
+  }
+  const totalSeconds = Math.round((endMs - startMs) / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+  return `${Math.floor(minutes / 60)}h${minutes % 60 > 0 ? ` ${minutes % 60}m` : ""}`;
+}
+
+function isActiveRunState(run: Pick<TaktRunSnapshot, "status" | "sessionStatus">): boolean {
+  return run.status === "running" || run.sessionStatus === "live";
 }
 
 function isDisplayableProject(project: TaktProjectWidgetEntry, now: number): boolean {
@@ -262,32 +328,8 @@ export function fitTaktWidgetLines(lines: readonly string[], width: number): str
   return lines.map((line) => truncateToWidth(line, columns));
 }
 
-function projectHeader(project: TaktProjectWidgetEntry): string {
-  const runner = project.runner;
-  const state = isPreparingProject(project) && !shouldOverlayPromptPreview(project.stage)
-    ? "◌ preparing"
-    : runner?.isRunning
-      ? "● live"
-      : runner?.hasSession
-        ? "■ finished"
-        : "◌ observed";
-  const stage = project.stage && project.stage !== "idle"
-    ? ` · stage:${formatTaktExecStage(project.stage)}`
-    : "";
-  return `TAKT [${project.label}] ${state}${stage} · ${project.cwd}`;
-}
-
 function isPreparingProject(project: TaktProjectWidgetEntry): boolean {
   return Boolean(project.isCurrent && project.runner?.isRunning && !hasTaktSummaryActivity(project.summary));
-}
-
-function renderPromptOverlay(project: TaktProjectWidgetEntry, progress?: string): string[] {
-  const preview = project.promptPreview?.trim() || "(prompt body omitted)";
-  return [
-    progress ?? `stage: ${formatTaktExecStage(project.stage ?? "pasting")}`,
-    "prompt preview:",
-    ...preview.split("\n").slice(0, MAX_PROJECT_ROWS - 3),
-  ];
 }
 
 function findActiveRun(summary: TaktSummary | undefined): TaktRunSnapshot | undefined {

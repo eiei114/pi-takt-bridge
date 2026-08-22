@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Redesign the stacked live widget as a marionette-style session list: one row
+  per session-owned TAKT process with a rotating braille spinner while actively
+  operated, emoji status (🟢 running, ⏳ starting/waiting, ✅ done with duration,
+  🔴 failed with an error snippet, ⚠️ stale), and a `🎭 TAKT · N strings`
+  header. Raw PTY output is no longer shown by default; `/takt:live [path]` now
+  opens an Esc-closable raw-screen peek overlay, and the new `/takt:sessions`
+  lists every known session with status before picking one to peek.
 - Make the stacked live widget a session-owned view: it renders only TAKT
   processes launched from the current Pi session. TAKT activity started in
   other terminals or other Pi sessions no longer mounts or populates the widget;

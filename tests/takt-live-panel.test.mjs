@@ -72,7 +72,7 @@ test("live widget keeps Pi focus and shows the current TAKT screen", async () =>
   terminal.dispose();
 });
 
-test("project stack shows only session-owned TAKT; external projects need explicit diagnostics", async () => {
+test("project stack shows session-owned rows with spinner and hides raw output", async () => {
   const liveTerminal = new Terminal({ cols: 30, rows: 8, allowProposedApi: true });
   await new Promise((resolve) => liveTerminal.write("repo-a live output", resolve));
   const liveRunner = {
@@ -96,15 +96,18 @@ test("project stack shows only session-owned TAKT; external projects need explic
   const lines = renderTaktProjectStack([
     { id: "b", label: "repo-b", cwd: "C:/repo-b", summary: observedSummary },
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
-  ], 30);
+  ], 60, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
 
   assert.ok(lines[0]?.includes("input:") && lines[0]?.includes("[pi]"));
-  // The externally started project never renders in this session's widget...
-  assert.ok(lines.every((line) => !line.includes("[repo-b]")));
-  assert.ok(lines.some((line) => !line.includes("external TAKT session")));
-  // ...while the session-owned live screen stays visible.
-  assert.ok(lines.some((line) => line.includes("[repo-a]")));
-  assert.ok(lines.some((line) => line.includes("repo-a live output")));
+  // Marionette header with the owned-session count.
+  assert.ok(lines.some((line) => line.includes("🎭 TAKT · 1 string")));
+  // Externally started projects never render here...
+  assert.ok(lines.every((line) => !line.includes("repo-b")));
+  // ...and raw PTY output stays out of the default widget.
+  assert.ok(lines.every((line) => !line.includes("live output")));
+  // The owned session shows as a spinner row.
+  const { taktSpinnerFrame } = await import("../lib/takt-live-panel.ts");
+  assert.ok(lines.some((line) => line.includes(taktSpinnerFrame(Date.parse("2026-08-20T00:00:00.000Z"))) && line.includes("🟢 repo-a")));
 
   const autoLines = renderTaktProjectStack([
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
@@ -148,7 +151,9 @@ test("project stack keeps requesting renders while a live PTY screen changes", a
   await new Promise((resolve) => terminal.write("live output", resolve));
   await new Promise((resolve) => setTimeout(resolve, 350));
   assert.ok(renders > 0);
-  assert.ok(frames.some((frame) => frame.some((line) => line.includes("live output"))));
+  // Raw output no longer appears in the stack; frames still render the row.
+  assert.ok(frames.every((frame) => frame.every((line) => !line.includes("live output"))));
+  assert.ok(frames.some((frame) => frame.some((line) => line.includes("🟢 live"))));
 
   widget.dispose();
   const rendersAfterDispose = renders;
@@ -160,7 +165,7 @@ test("project stack keeps requesting renders while a live PTY screen changes", a
 test("project stack shows input mode even with no active sessions", () => {
   const lines = renderTaktProjectStack([], 40, "takt");
   assert.equal(lines[0], "input: pi | [takt] | pi-auto");
-  assert.ok(lines.some((line) => line.includes("no active sessions")));
+  assert.ok(lines.some((line) => line.includes("no active strings")));
 });
 
 test("project stack hides quiet observed pending activity after the inactivity TTL", () => {
@@ -185,7 +190,7 @@ test("project stack hides quiet observed pending activity after the inactivity T
 
   const lines = renderTaktProjectStack([project], 80, "pi", { now });
   assert.ok(lines.every((line) => !line.includes("[pending]")));
-  assert.ok(lines.some((line) => line.includes("no active sessions")));
+  assert.ok(lines.some((line) => line.includes("no active strings")));
 });
 
 test("project stack hides observed pending activity entirely; use /takt:status instead", () => {
@@ -210,7 +215,7 @@ test("project stack hides observed pending activity entirely; use /takt:status i
 
   assert.ok(lines.every((line) => !line.includes("[pending]")));
   assert.ok(lines.every((line) => !line.includes("1 pending")));
-  assert.ok(lines.some((line) => line.includes("no active sessions")));
+  assert.ok(lines.some((line) => line.includes("no active strings")));
 });
 
 test("project stack hides bridge sessions after stop, failure, or natural completion", () => {
@@ -226,7 +231,7 @@ test("project stack hides bridge sessions after stop, failure, or natural comple
       { id: "finished", label: "finished", cwd: "C:/finished", runner, stage },
     ], 40);
     assert.ok(lines.every((line) => !line.includes("[finished]")));
-    assert.ok(lines.some((line) => line.includes("no active sessions")));
+    assert.ok(lines.some((line) => line.includes("no active strings")));
   }
 });
 
@@ -263,7 +268,9 @@ test("project stack keeps a live PTY when only a historical run is completed", (
     },
   ], 40);
 
-  assert.ok(lines.some((line) => line.includes("[finished]")));
+  // The PTY is still owned and alive, so the session stays visible as an
+  // actively operated string even though the last recorded run completed.
+  assert.ok(lines.some((line) => line.includes("🟢 finished")));
 });
 
 test("project stack shows only the current project while TAKT is preparing", () => {
@@ -278,12 +285,12 @@ test("project stack shows only the current project while TAKT is preparing", () 
     { id: "current", label: "current", cwd: "C:/current", isCurrent: true, runner },
   ], 60);
 
-  assert.ok(lines.some((line) => line.includes("[current]")));
-  assert.ok(lines.some((line) => line.includes("preparing")));
-  assert.ok(lines.every((line) => !line.includes("[other]")));
+  assert.ok(lines.some((line) => line.includes("⏳ current")));
+  assert.ok(lines.some((line) => line.includes("starting…")));
+  assert.ok(lines.every((line) => !line.includes("other · ")));
 });
 
-test("project stack overlays long prompt previews while pasting", async () => {
+test("project stack collapses pasting into one compact line without the prompt body", async () => {
   const liveTerminal = new Terminal({ cols: 40, rows: 8, allowProposedApi: true });
   await new Promise((resolve) => liveTerminal.write("HUGE PASTED BODY SHOULD BE HIDDEN", resolve));
   const liveRunner = {
@@ -301,10 +308,10 @@ test("project stack overlays long prompt previews while pasting", async () => {
       stage: "pasting",
       promptPreview: "## Issue #1331\n…(12 more lines, 900 chars)\n## Done",
     },
-  ], 40);
-  assert.ok(lines.some((line) => line.includes("stage:pasting")));
-  assert.ok(lines.some((line) => line.includes("prompt preview:")));
-  assert.ok(lines.some((line) => line.includes("Issue #1331")));
+  ], 60, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
+  assert.ok(lines.some((line) => line.includes("📋 takt")));
+  assert.ok(lines.some((line) => line.includes("pasting prompt (50 chars)")));
+  assert.ok(!lines.some((line) => line.includes("Issue #1331")));
   assert.ok(!lines.some((line) => line.includes("HUGE PASTED BODY SHOULD BE HIDDEN")));
   liveTerminal.dispose();
 });

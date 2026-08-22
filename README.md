@@ -43,7 +43,8 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | Command | Purpose |
 |---|---|
 | `/takt` | Start or attach to the live TAKT widget |
-| `/takt:live` | Show the current live/final TAKT widget |
+| `/takt:live [path]` | Peek a session's raw TAKT screen (Esc closes) |
+| `/takt:sessions` | List TAKT sessions with status and pick one to peek |
 | `/takt:enqueue [path]` | Ask TAKT ACP to add a worktree task in a selected folder |
 | `/takt:project [path]` | Register another repo/folder for detection and stacked display |
 | `/takt:project:init [profile]` | Create project-local `.takt` scaffolding and register a profile |
@@ -107,13 +108,24 @@ leaving Pi:
   (destructive input still confirms)
 
 The current Pi folder plus registered folders are monitored. The stacked live
-widget is a session-owned view: it shows only TAKT processes launched from this
-Pi session, with the most active project first. A TAKT process started in
-another terminal or another Pi session is never displayed automatically; inspect
-it explicitly with `/takt:status [path]` or `takt_read_screen`. This only cleans
-the Pi display; it never deletes TAKT tasks or run history automatically.
-The bridge only stops PTYs it created, and bounded stop failures are reported
-instead of retried indefinitely.
+widget is a session-owned, summary-only view: it renders one compact row per
+TAKT process launched from this Pi session, with the most active first —
+
+```
+🎭 TAKT · 3 strings
+⠋ 🟢 repo-a · dual    🔨 implement 2/3 · p1 execute
+⠋ 🔵 repo-c · simple  🔍 review 3/3
+✅ repo-b · default    done · 12m
+```
+
+A rotating braille spinner means the session is actively operated; completed
+and failed sessions stop spinning (`✅` done, `🔴 … ❌ failed` plus an error
+snippet). Raw PTY output is never shown by default: peek it explicitly with
+`/takt:live [path]` or `/takt:sessions`, or inspect external runs (other
+terminals or other Pi sessions) via `/takt:status [path]` or `takt_read_screen`.
+This only cleans the Pi display; it never deletes TAKT tasks or run history
+automatically. The bridge only stops PTYs it created, and bounded stop failures
+are reported instead of retried indefinitely.
 
 Default mode keeps Pi focused. Use `/takt:mode` or `Ctrl+Alt+T` when you want
 direct TAKT focus or Pi-auto follow-ups.

@@ -200,15 +200,16 @@ still asks for confirmation. `/takt:stop` keeps an interactive confirm; the
 ## Live widget and diagnostics
 
 `/takt` starts a run in the current project if no terminal session exists, or
-shows the current stack. `/takt:live` shows the stack without starting a new
-process. The widget is placed above the normal Pi editor, so Pi and multiple
-TAKT projects stay visible together. It uses `node-pty` plus an xterm-compatible
-headless buffer so ANSI cursor movement, clear-screen sequences, colors, and
-progress updates are rendered as a screen rather than dumped as broken escape
-codes. Each panel is capped to the latest visible lines to preserve Pi's editor
-space. While a bridge-owned PTY is active, the widget also performs a lightweight
-100 ms repaint fallback so in-place TAKT output remains visible if host-side
-screen events are coalesced.
+shows the current stack. `/takt:live [path]` and `/takt:sessions` open an
+Esc-closable overlay with the raw TAKT screen of the chosen session; the
+stacked widget itself stays summary-only. The widget is placed above the normal
+Pi editor, so Pi and multiple TAKT sessions stay visible together. Raw peek
+overlays use `node-pty` plus an xterm-compatible headless buffer so ANSI cursor
+movement, clear-screen sequences, colors, and progress updates are rendered as
+a screen rather than dumped as broken escape codes. Peek output is capped to
+the latest lines to preserve Pi's editor space. While a bridge-owned PTY is
+active, the widget also performs a lightweight 100 ms repaint fallback so the
+spinner keeps turning even if host-side screen events are coalesced.
 
 The background project-stack refresh reads persistent `.takt/runs` metadata and
 does not invoke `takt list`. The stacked widget itself only renders TAKT

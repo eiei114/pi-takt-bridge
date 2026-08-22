@@ -1701,6 +1701,53 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
   }
 
+  /**
+   * Explicit raw-screen access: /takt:live [path] and /takt:sessions both land
+   * here. The stacked widget stays summary-only by default.
+   */
+  async peekSession(args = ""): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    const project = await this.selectProject(
+      args,
+      "Peek TAKT session",
+      () => true,
+    );
+    if (!project) {
+      return;
+    }
+    await openLiveScreenOverlay(context, project);
+  }
+
+  /** /takt:sessions — one status line per known session, then peek the choice. */
+  async listSessions(): Promise<void> {
+    const context = this.context;
+    if (!context?.hasUI) {
+      return;
+    }
+    const sessions = [...this.projects.values()]
+      .filter((project) => project.runner.hasSession || project.runner.isRunning || project.summary !== undefined)
+      .sort(compareManagedProjectsForMenu);
+    if (sessions.length === 0) {
+      context.ui.notify("🎭 TAKT · no sessions yet. Start one with /takt:start or /takt:exec.", "info");
+      return;
+    }
+    const selected = await context.ui.select(
+      "🎭 TAKT sessions — pick one to peek",
+      sessions.map((project) => sessionMenuLabel(project)),
+    );
+    if (!selected) {
+      return;
+    }
+    // Map the rendered label back to its project.
+    const match = sessions.find((project) => selected.startsWith(project.label));
+    if (match) {
+      await openLiveScreenOverlay(context, match);
+    }
+  }
+
   private hasDisplayableProject(): boolean {
     // Session-owned view only: externally started TAKT activity must not mount
     // or keep the live widget here. Explicit diagnostics (/takt:status,
@@ -1970,6 +2017,61 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 function shouldUsePromptOverlay(project: ManagedProject): boolean {
   return shouldOverlayPromptPreview(project.stage) && Boolean(project.promptPreview?.trim());
+}
+
+function sessionMenuLabel(project: ManagedProject): string {
+  const run = project.summary?.runs.find((candidate) =>
+    candidate.status === "running" || candidate.sessionStatus === "live");
+  const state = project.stage === "failed"
+    ? "🔴❌"
+    : project.runner.isRunning
+      ? "🟢⠋"
+      : run?.status === "stale"
+        ? "⚠️ "
+        : project.summary?.runs.some((candidate) => candidate.status === "completed")
+          ? "✅"
+          : "🔵";
+  const workflow = run?.workflow ?? project.summary?.runs[0]?.workflow;
+  return `${state} ${project.label}${workflow ? ` · ${workflow}` : ""} — ${project.cwd}`;
+}
+
+function compareManagedProjectsForMenu(left: ManagedProject, right: ManagedProject): number {
+  const score = (project: ManagedProject): number =>
+    project.runner.isRunning ? 2 : project.runner.hasSession ? 1 : 0;
+  return score(right) - score(left) || left.label.localeCompare(right.label);
+}
+
+/** Esc-closable raw screen overlay; the default widget stays summary-only. */
+function openLiveScreenOverlay(context: ExtensionContext, project: ManagedProject): Promise<void> {
+  return context.ui.custom<void>((_tui, theme, _keybindings, done) => {
+    const text = new Text("", 0, 0);
+    const repaint = (): void => {
+      const lines: string[] = [
+        theme.fg("accent", `🎭 ${project.label} · ${project.cwd}`),
+        theme.fg("dim", "raw TAKT screen · enter/esc closes"),
+        "",
+      ];
+      if (project.runner.terminal) {
+        lines.push(...visibleWidgetLines(renderTaktTerminal(project.runner.terminal), 22));
+      } else if (project.summary) {
+        lines.push(...renderSummaryScreen(project.summary).slice(0, 22));
+      } else {
+        lines.push(theme.fg("dim", "no TAKT activity observed yet"));
+      }
+      text.setText(lines.join("\n"));
+      text.invalidate();
+    };
+    repaint();
+    return {
+      render: (width: number) => text.render(width),
+      invalidate: () => text.invalidate(),
+      handleInput: (data: string) => {
+        if (matchesKey(data, "escape") || matchesKey(data, "enter")) {
+          done();
+        }
+      },
+    };
+  }, { overlay: true });
 }
 
 async function loadPiModelRefs(): Promise<string[]> {
@@ -2525,9 +2627,16 @@ export default function register(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("takt:live", {
-    description: "Show live TAKT output from all active project folders",
+    description: "Peek the raw TAKT screen of a session (Esc to close)",
+    handler: async (args, _context) => {
+      await runtime?.peekSession(args);
+    },
+  });
+
+  pi.registerCommand("takt:sessions", {
+    description: "List TAKT sessions and pick one to peek",
     handler: async (_args, _context) => {
-      await runtime?.showLive();
+      await runtime?.listSessions();
     },
   });
 
