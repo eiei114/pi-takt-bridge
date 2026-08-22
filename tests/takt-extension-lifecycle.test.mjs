@@ -519,7 +519,10 @@ test("project setup surfaces an external run stored in a managed clone", async (
       preset: "pi-docs",
     }, context);
 
-    assert.notEqual(context.widgetUpdates.at(-1)?.widget, undefined);
+    // Session-owned widget rule: an externally started clone run must not
+    // mount the live widget; it stays reachable through explicit diagnostics.
+    const lastWidgetUpdate = context.widgetUpdates.at(-1);
+    assert.ok(lastWidgetUpdate === undefined || lastWidgetUpdate.widget === undefined);
     const observed = await invoke(tools, "takt_read_screen", { rows: 4 }, context);
     assert.equal(observed.details.cwd, targetProject);
     assert.equal(observed.details.status, "live");

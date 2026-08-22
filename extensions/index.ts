@@ -52,6 +52,7 @@ import {
 } from "../lib/takt-state.ts";
 import {
   formatTaktLastExit,
+  hasRecentTaktSummaryActivity,
   type TaktLastExit,
   type TaktSessionStatus,
   type TaktSummary,
