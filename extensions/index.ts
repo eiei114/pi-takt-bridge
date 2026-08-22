@@ -58,6 +58,17 @@ import {
   type TaktSummary,
 } from "../lib/takt-types.ts";
 import { renderTaktDetails } from "../lib/takt-widget.ts";
+import {
+  collectSelectableSteps,
+  listWorkflowNames,
+  type WorkflowStepRef,
+} from "../lib/takt-workflow-steps.ts";
+import {
+  applyStepModelSelections,
+  type StepModelSelection,
+} from "../lib/takt-runtime-yaml.ts";
+import { formatPiModelRef, listPiModels } from "../lib/takt-pi-models.ts";
+import { SearchableListController } from "../lib/takt-search-select.ts";
 
 const WIDGET_KEY = "pi-takt-bridge-projects";
 const STATUS_KEY = "pi-takt-bridge-input-mode";
@@ -1222,6 +1233,92 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     return { ...local, profile: profileName, registered: true };
   }
 
+  /**
+   * Per-step Pi model selection: workflow → steps → model per step →
+   * merged into <project>/.takt/runtime.yaml as runtime-v1 profiles/targets.
+   */
+  async selectStepModels(context: ExtensionContext, workflowArg?: string): Promise<void> {
+    const cwd = context.cwd;
+    const taktCommand = process.env.TAKT_COMMAND ?? "takt";
+
+    let workflowName = workflowArg;
+    if (!workflowName) {
+      const workflows = await listWorkflowNames(cwd, taktCommand);
+      if (workflows.length === 0) {
+        context.ui.notify("No TAKT workflows found in .takt/workflows, ~/.takt/workflows, or builtins.", "warning");
+        return;
+      }
+      const selected = await openSearchableSelect(
+        context,
+        `Workflow (${workflows.length} available; type to filter)`,
+        workflows.map((entry) => entry.name),
+      );
+      if (!selected) {
+        return;
+      }
+      workflowName = selected;
+    }
+
+    const { root, steps } = await collectSelectableSteps(cwd, workflowName, taktCommand);
+    if (steps.length === 0) {
+      context.ui.notify(`Workflow ${root.name} has no selectable agent steps.`, "warning");
+      return;
+    }
+
+    const modelRefs = await loadPiModelRefs();
+    if (modelRefs.length === 0) {
+      context.ui.notify("pi --list-models returned no auth-configured models.", "error");
+      return;
+    }
+
+    const inheritOption = "(inherit global default)";
+    const selections: StepModelSelection[] = [];
+    for (const step of steps) {
+      if (step.unresolvedCall !== undefined) {
+        continue;
+      }
+      const pinnedSuffix = step.pinnedInline ? " [pinned in YAML]" : "";
+      const chosen = await openSearchableSelect(
+        context,
+        `${step.targetKey}${pinnedSuffix} — pick model`,
+        [inheritOption, ...modelRefs],
+      );
+      if (chosen === undefined) {
+        context.ui.notify("Model selection cancelled; runtime.yaml unchanged.", "info");
+        return;
+      }
+      if (chosen !== inheritOption) {
+        selections.push({ targetKey: step.targetKey, modelRef: chosen });
+      }
+    }
+
+    const unresolved = steps.filter((step): step is WorkflowStepRef => step.unresolvedCall !== undefined);
+    const inheritedCount = steps.length - unresolved.length - selections.length;
+    const summaryLines = [
+      `workflow: ${root.name} (${root.layer})`,
+      ...selections.map((selection) => `  ${selection.targetKey} → ${selection.modelRef}`),
+      ...(inheritedCount > 0 ? [`  ${inheritedCount} step(s) keep the inherited default`] : []),
+      ...unresolved.map((step) => `  ${step.targetKey} — call ${step.unresolvedCall} not expanded`),
+      "",
+      `Write these into .takt/runtime.yaml?`,
+    ];
+    const confirmed = await context.ui.confirm("Apply per-step models", summaryLines.join("\n"));
+    if (!confirmed) {
+      context.ui.notify("Cancelled; runtime.yaml unchanged.", "info");
+      return;
+    }
+
+    if (selections.length === 0) {
+      context.ui.notify("All steps keep the inherited default; runtime.yaml unchanged.", "info");
+      return;
+    }
+    const result = applyStepModelSelections(cwd, root.name, selections);
+    context.ui.notify(
+      `runtime.yaml updated: ${result.updatedTargets} step target(s), profiles: ${result.profiles.join(", ")}`,
+      "info",
+    );
+  }
+
   async listProfiles(): Promise<void> {
     const context = this.context;
     if (!context?.hasUI) {
@@ -1872,6 +1969,57 @@ function shouldUsePromptOverlay(project: ManagedProject): boolean {
   return shouldOverlayPromptPreview(project.stage) && Boolean(project.promptPreview?.trim());
 }
 
+async function loadPiModelRefs(): Promise<string[]> {
+  try {
+    const models = await listPiModels("pi");
+    return models.map(formatPiModelRef);
+  } catch (error) {
+    throw new Error(`pi --list-models failed: ${errorMessage(error)}`);
+  }
+}
+
+/** Type-to-filter selection dialog built on the same primitives as /takt:status. */
+function openSearchableSelect(
+  context: ExtensionContext,
+  title: string,
+  options: readonly string[],
+): Promise<string | undefined> {
+  return context.ui.custom<string | undefined>((_tui, theme, _keybindings, done) => {
+    const controller = new SearchableListController(options);
+    const text = new Text("", 0, 0);
+    const repaint = (): void => {
+      const lines = [
+        theme.fg("accent", title),
+        theme.fg("dim", `filter: ${controller.getQuery() || "(type to filter)"} · up/down move · enter pick · esc back`),
+        "",
+        ...controller.visible().map((entry) =>
+          entry.active ? theme.fg("text", `❯ ${entry.text}`) : theme.fg("muted", `  ${entry.text}`)),
+      ];
+      text.setText(lines.join("\n"));
+      text.invalidate();
+    };
+    repaint();
+    return {
+      render: (width: number) => text.render(width),
+      invalidate: () => text.invalidate(),
+      handleInput: (data: string) => {
+        const action = controller.handleInput(data);
+        if (action === "cancelled") {
+          done(undefined);
+          return;
+        }
+        if (action === "confirmed") {
+          done(controller.getHighlightedValue());
+          return;
+        }
+        if (action === "changed") {
+          repaint();
+        }
+      },
+    };
+  }, { overlay: true });
+}
+
 async function delay(milliseconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -2465,6 +2613,17 @@ export default function register(pi: ExtensionAPI): void {
     description: "Remove a registered TAKT project folder",
     handler: async (args, _context) => {
       await runtime?.removeProject(args);
+    },
+  });
+
+  pi.registerCommand("takt:models", {
+    description: "Pick per-step Pi models for a TAKT workflow into .takt/runtime.yaml",
+    handler: async (args, context) => {
+      try {
+        await runtime?.selectStepModels(context, args.trim() || undefined);
+      } catch (error) {
+        context.ui.notify(`takt:models failed: ${errorMessage(error)}`, "error");
+      }
     },
   });
 

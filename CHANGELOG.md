@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `/takt:models [workflow]`: pick a Pi model per workflow step through
+  type-to-filter dialogs and merge the result into the project's
+  `.takt/runtime.yaml` as runtime-v1 profiles plus `<workflow>/<step>`
+  targets. Model candidates come from `pi --list-models`, so auth-configured
+  extension providers appear automatically; steps may also inherit the global
+  default.
 - Mark workflows resolved from TAKT's built-in set with a `(default)` suffix in
   the `flow` progress line (for example `flow dual (default)`), using the
   workflow bundle manifest's opaque ref source layer; project-defined and

@@ -51,6 +51,7 @@ pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
 | `/takt:profile:add [name]` | Save a named folder and optional exec preset once |
 | `/takt:profile [name]` | List saved project profiles |
 | `/takt:profile:remove [name]` | Remove a saved project profile |
+| `/takt:models [workflow]` | Pick per-step Pi models for a TAKT workflow into `.takt/runtime.yaml` |
 | `/takt:start [path]` | Confirm and start pending tasks in the selected folder |
 | `/takt:clear [path]` | Clear the selected project's previous TAKT exec session |
 | `/takt:exec [path]` | Start a fresh interactive `takt exec` PTY in a selected folder |

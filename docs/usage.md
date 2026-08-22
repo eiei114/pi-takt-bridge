@@ -227,6 +227,23 @@ example `flow dual (default)`, so they stay distinguishable from workflows
 defined in the project's `.takt/workflows`. Before run metadata is available,
 the bar tracks bridge stages such as `waiting prompt` and `sending go` instead.
 
+### Per-step model selection (`/takt:models`)
+
+`/takt:models [workflow]` selects a Pi model per workflow step before the
+workflow starts. The command lists steps from project, user-global, and
+builtin workflow YAML (top-level `workflow_call` steps expand one level),
+then shows one type-to-filter dialog per step with every model `pi
+--list-models` reports — auth-configured extension providers appear
+automatically, so provider prerequisites stay linked behind the scenes.
+Choosing `(inherit global default)` leaves a step untouched.
+
+Selections merge into the project's `.takt/runtime.yaml` as runtime-v1
+profiles (`provider: pi`) plus `<workflow>/<step>` targets, preserving
+existing profiles and unrelated step targets. TAKT resolves these at run
+start; an active runtime section must not coexist with legacy provider
+settings such as `config.yaml` `provider_routing`, so projects using those
+must migrate first or keep using their current configuration.
+
 In the default `pi` mode the widget does not capture keyboard focus. Use
 `/takt:send` for explicit interactive input, `/takt:mode takt` for direct PTY
 focus, and `/takt:stop` to stop TAKT. When a bridge-owned child exits, is
