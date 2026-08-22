@@ -113,15 +113,16 @@ TAKT process launched from this Pi session, with the most active first —
 
 ```
 🎭 TAKT · 3 strings
-⠋ 🟢 repo-a · dual    [###>-------] 🔨 implement 2/3 · p1/3 i2
+⠋ 🟢 repo-a · dual    ███▓░░░░░░░ 🔨 implement 2/3 · p1/3 i2
 └ 📄 lib/takt-state.ts
 ✅ repo-b · default    done · 12m
 ```
 
 A rotating braille spinner means the session is actively operated; completed
 and failed sessions stop spinning (`✅` done, `🔴 … ❌ failed` plus an error
-snippet). The meter fills by completed workflow steps and moves inside the
-active step through its execute → report → judge phases. Under active rows,
+snippet). The block meter (█ filled, ▓ pulsing boundary, ░ pending) fills by
+completed workflow steps and moves inside the active step through its
+execute → report → judge phases. Under active rows,
 a dim `📄 <path>` line surfaces the most recent file-like path seen on the
 session's own screen (heuristic, stateless). Raw PTY output is never shown by
 default: peek it explicitly with `/takt:live [path]` or `/takt:sessions`, or

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Restyle the sub-step meter as pulsing blocks (`███▓░░░░░░░`) instead of ASCII brackets.
 - Add sub-step progress to session rows: a 10-cell meter fills by completed
   workflow steps and advances inside the active step through its execute →
   report → judge phases, and active rows gain a dim `📄 <path>` sub-line with

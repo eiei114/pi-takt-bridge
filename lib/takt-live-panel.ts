@@ -261,7 +261,7 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   }
 
   if (run && isActiveRunState(run)) {
-    return `${spin} 🟢 ${project.label}${workflowTag} ${stepMeter(run)} ${describeActiveRun(run)}`;
+    return `${spin} 🟢 ${project.label}${workflowTag} ${stepMeter(run, now)} ${describeActiveRun(run)}`;
   }
 
   if (project.stage === "failed") {
@@ -298,21 +298,26 @@ const STEP_METER_CELLS = 10;
 /**
  * Sub-step progress meter: completed workflow steps fill cells fully and the
  * active step fills by its phase (execute → report → judge), so the bar moves
- * inside a step instead of only when steps change.
+ * inside a step instead of only when steps change. The boundary cell pulses
+ * with the spinner tick so an operated session visibly breathes.
  */
-export function stepMeter(run: Pick<TaktRunSnapshot, "workflowSteps" | "currentStep" | "phase">): string {
+export function stepMeter(
+  run: Pick<TaktRunSnapshot, "workflowSteps" | "currentStep" | "phase">,
+  nowMs = Date.now(),
+): string {
   const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
   if (steps.length === 0) {
     return "";
   }
   const currentIndex = run.currentStep ? steps.indexOf(run.currentStep) : -1;
   if (currentIndex < 0) {
-    return `[${"-".repeat(STEP_METER_CELLS)}]`;
+    return "░".repeat(STEP_METER_CELLS);
   }
   const phaseFraction = ((run.phase ?? 1) - 1) / 3;
   const progress = (currentIndex + phaseFraction) / steps.length;
   const filled = Math.min(STEP_METER_CELLS - 1, Math.floor(progress * STEP_METER_CELLS));
-  return `[${"#".repeat(filled)}>${"-".repeat(STEP_METER_CELLS - filled)}]`;
+  const pulse = Math.floor(Math.max(0, nowMs) / SPINNER_INTERVAL_MS) % 2 === 0 ? "▓" : "▒";
+  return `${"█".repeat(filled)}${pulse}${"░".repeat(STEP_METER_CELLS - filled - 1)}`;
 }
 
 /** File-path-like token used to surface what the worker is touching right now. */
