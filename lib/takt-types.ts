@@ -64,6 +64,8 @@ export interface TaktRunSnapshot {
   workflow: string;
   /** Top-level workflow step names from the run's immutable workflow bundle. */
   workflowSteps?: string[];
+  /** Workflow source layer from the run bundle manifest: builtin, user, project, or repertoire. */
+  workflowSource?: string;
   status: TaktStatus;
   sessionStatus: TaktSessionStatus;
   pid?: number;

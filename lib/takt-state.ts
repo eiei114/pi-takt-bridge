@@ -169,10 +169,18 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+/** Workflow bundle facts the bridge can read without invoking TAKT. */
+export interface TaktWorkflowBundleInfo {
+  /** Top-level workflow step names from the immutable workflow bundle. */
+  steps?: readonly string[];
+  /** Workflow source layer parsed from the manifest's opaque ref (builtin/user/project/repertoire). */
+  source?: string;
+}
+
 export function snapshotRun(
   meta: TaktRunMeta,
   ownerPid?: number,
-  workflowSteps?: readonly string[],
+  bundleInfo?: TaktWorkflowBundleInfo,
 ): TaktRunSnapshot {
   const pid = ownerPid ?? meta.ownerPid ?? meta.pid;
   const status = classifyRunStatus(meta, pid);
@@ -182,7 +190,8 @@ export function snapshotRun(
     slug: meta.runSlug,
     task: meta.task,
     workflow: meta.workflow,
-    ...(workflowSteps && workflowSteps.length > 0 ? { workflowSteps: [...workflowSteps] } : {}),
+    ...(bundleInfo?.steps && bundleInfo.steps.length > 0 ? { workflowSteps: [...bundleInfo.steps] } : {}),
+    ...(bundleInfo?.source ? { workflowSource: bundleInfo.source } : {}),
     status,
     sessionStatus,
     ...(pid !== undefined ? { pid } : {}),
@@ -226,10 +235,10 @@ export function readRunSnapshots(cwd: string, taskItems: readonly TaktTaskItem[]
           continue;
         }
         const ownerPid = findOwnerPid(meta, taskItems);
-        const workflowSteps = meta.status === "running"
-          ? readWorkflowStepNames(runCwd, entry.name)
+        const bundleInfo = meta.status === "running"
+          ? readWorkflowBundleInfo(runCwd, entry.name)
           : undefined;
-        const snapshot = { ...snapshotRun(meta, ownerPid, workflowSteps), workspace: runCwd };
+        const snapshot = { ...snapshotRun(meta, ownerPid, bundleInfo), workspace: runCwd };
         const existing = snapshotsBySlug.get(entry.name);
         if (!existing || compareRuns(snapshot, existing) < 0) {
           snapshotsBySlug.set(entry.name, snapshot);
@@ -278,7 +287,7 @@ function readRunWorkspaces(cwd: string): string[] {
   return workspaces;
 }
 
-function readWorkflowStepNames(cwd: string, runSlug: string): string[] | undefined {
+function readWorkflowBundleInfo(cwd: string, runSlug: string): TaktWorkflowBundleInfo | undefined {
   try {
     const bundleRoot = resolve(cwd, ".takt", "runs", runSlug, "workflow-bundle");
     const manifest = JSON.parse(readFileSync(resolve(bundleRoot, "manifest.json"), "utf8"));
@@ -294,18 +303,33 @@ function readWorkflowStepNames(cwd: string, runSlug: string): string[] | undefin
       return undefined;
     }
     const node = JSON.parse(readFileSync(resolve(bundleRoot, "objects", `${objectHash}.json`), "utf8"));
-    if (!isRecord(node) || !isRecord(node.config) || !Array.isArray(node.config.steps)) {
-      return undefined;
+    const info: TaktWorkflowBundleInfo = {};
+    const source = parseWorkflowSource(manifest.root.originalWorkflowRef);
+    if (source !== undefined) {
+      info.source = source;
     }
-    const names = node.config.steps
-      .map((step) => isRecord(step) && isNonEmptyString(step.name) ? step.name.trim() : undefined)
-      .filter((name): name is string => name !== undefined);
-    return names.length > 0 ? names : undefined;
+    if (isRecord(node) && isRecord(node.config) && Array.isArray(node.config.steps)) {
+      const names = node.config.steps
+        .map((step) => isRecord(step) && isNonEmptyString(step.name) ? step.name.trim() : undefined)
+        .filter((name): name is string => name !== undefined);
+      if (names.length > 0) {
+        info.steps = names;
+      }
+    }
+    return Object.keys(info).length > 0 ? info : undefined;
   } catch {
     // Workflow bundles are published after run metadata; use currentStep/phase
     // until the immutable bundle becomes available or when running older TAKT.
     return undefined;
   }
+}
+
+/** TAKT opaque workflow refs look like `<source>:sha256:<hash>` with source builtin|user|project|repertoire. */
+function parseWorkflowSource(value: unknown): string | undefined {
+  if (!isNonEmptyString(value)) {
+    return undefined;
+  }
+  return /^([a-z][a-z0-9_-]*):sha256:/i.exec(value)?.[1]?.toLowerCase();
 }
 
 export async function readTaktSummary(cwd: string, options: TaktStateOptions = {}): Promise<TaktSummary> {

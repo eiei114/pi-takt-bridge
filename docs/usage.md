@@ -222,8 +222,10 @@ task-management flow.
 When a running run has a workflow bundle, each project card shows its current
 step and phase as a compact monospace bar, for example
 `flow default [##########>---------] 2/3 step: implement · p1/3 execute`.
-Before run metadata is available, the bar tracks bridge stages such as
-`waiting prompt` and `sending go` instead.
+Workflows resolved from TAKT's built-in set are marked with `(default)`, for
+example `flow dual (default)`, so they stay distinguishable from workflows
+defined in the project's `.takt/workflows`. Before run metadata is available,
+the bar tracks bridge stages such as `waiting prompt` and `sending go` instead.
 
 In the default `pi` mode the widget does not capture keyboard focus. Use
 `/takt:send` for explicit interactive input, `/takt:mode takt` for direct PTY

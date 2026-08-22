@@ -39,7 +39,7 @@ export function renderTaktWorkflowProgress({
 }
 
 function renderRunProgress(run: TaktRunSnapshot, width: number): string | undefined {
-  const workflow = compactLabel(run.workflow, "workflow");
+  const workflow = workflowLabel(run);
   const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
   const currentStep = run.currentStep?.trim();
   const currentIndex = currentStep ? steps.indexOf(currentStep) : -1;
@@ -125,7 +125,11 @@ function isActiveRun(run: TaktRunSnapshot): boolean {
     run.sessionStatus === "live" || run.sessionStatus === "stale";
 }
 
-function compactLabel(value: string, fallback: string): string {
-  const normalized = value.trim().replaceAll(/\s+/g, " ");
-  return normalized || fallback;
+/** Mark workflows resolved from TAKT's built-in set so project-defined names stay distinguishable. */
+function workflowLabel(run: Pick<TaktRunSnapshot, "workflow" | "workflowSource">): string {
+  const normalized = run.workflow.trim().replaceAll(/\s+/g, " ");
+  if (normalized.length === 0) {
+    return "workflow";
+  }
+  return run.workflowSource === "builtin" ? `${normalized} (default)` : normalized;
 }

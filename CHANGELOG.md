@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Mark workflows resolved from TAKT's built-in set with a `(default)` suffix in
+  the `flow` progress line (for example `flow dual (default)`), using the
+  workflow bundle manifest's opaque ref source layer; project-defined and
+  legacy manifests without an opaque ref stay unmarked.
 - Fix macOS CI/`node-pty` startups that failed with `posix_spawnp failed`
   because the published `spawn-helper` binaries are mode `0644`; chmod them
   `0755` via root `postinstall` and an explicit CI step.

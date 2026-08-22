@@ -96,14 +96,44 @@ test("observed activity remains visible while fresh and hides after the inactivi
   assert.equal(hasRecentTaktSummaryActivity(summary, now + 15 * 60 * 1_000, 30 * 60 * 1_000), false);
 });
 
-function writeWorkflowBundle(cwd, slug, steps) {
+test("run snapshots carry the workflow source layer from bundle manifests", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-state-source-"));
+  const runs = join(cwd, ".takt", "runs");
+  mkdirSync(join(runs, "builtin-run"), { recursive: true });
+  mkdirSync(join(runs, "project-run"), { recursive: true });
+  writeWorkflowBundle(cwd, "builtin-run", ["plan", "review"], `builtin:sha256:${"c".repeat(64)}`);
+  writeWorkflowBundle(cwd, "project-run", ["plan"], `project:sha256:${"d".repeat(64)}`);
+  writeFileSync(join(runs, "builtin-run", "meta.json"), JSON.stringify({ ...validMeta, runSlug: "builtin-run", workflow: "dual" }));
+  writeFileSync(join(runs, "project-run", "meta.json"), JSON.stringify({ ...validMeta, runSlug: "project-run", workflow: "custom-flow" }));
+
+  const snapshots = readRunSnapshots(cwd);
+  const bySlug = new Map(snapshots.map((run) => [run.slug, run]));
+  assert.equal(bySlug.get("builtin-run")?.workflowSource, "builtin");
+  assert.deepEqual(bySlug.get("builtin-run")?.workflowSteps, ["plan", "review"]);
+  assert.equal(bySlug.get("project-run")?.workflowSource, "project");
+});
+
+// Legacy manifests without an opaque ref (plain name only) must stay unmarked.
+test("run snapshots omit the workflow source when the manifest has no opaque ref", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-state-legacy-"));
+  const runs = join(cwd, ".takt", "runs");
+  mkdirSync(join(runs, "legacy"), { recursive: true });
+  writeWorkflowBundle(cwd, "legacy", ["plan"]);
+  writeFileSync(join(runs, "legacy", "meta.json"), JSON.stringify({ ...validMeta, runSlug: "legacy" }));
+
+  const snapshots = readRunSnapshots(cwd);
+  assert.equal(snapshots[0]?.workflowSource, undefined);
+  assert.deepEqual(snapshots[0]?.workflowSteps, ["plan"]);
+});
+
+function writeWorkflowBundle(cwd, slug, steps, originalWorkflowRef = "default") {
   const bundleRoot = join(cwd, ".takt", "runs", slug, "workflow-bundle");
   const nodeId = "a".repeat(64);
   const objectHash = "b".repeat(64);
   mkdirSync(join(bundleRoot, "objects"), { recursive: true });
   writeFileSync(join(bundleRoot, "manifest.json"), JSON.stringify({
     version: 1,
-    root: { nodeId, workflowName: "default", originalWorkflowRef: "default" },
+    root: { nodeId, workflowName: "default", originalWorkflowRef },
     nodes: { [nodeId]: objectHash },
     resources: {},
   }), "utf8");
