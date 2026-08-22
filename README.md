@@ -1,7 +1,15 @@
 # pi-takt-marionette
 
-Pi extension for running [TAKT](https://github.com/eiei114/takt) without
-leaving the Pi TUI.
+[![CI](https://github.com/eiei114/pi-takt-marionette/actions/workflows/ci.yml/badge.svg)](https://github.com/eiei114/pi-takt-marionette/actions/workflows/ci.yml)
+[![Publish](https://github.com/eiei114/pi-takt-marionette/actions/workflows/publish.yml/badge.svg)](https://github.com/eiei114/pi-takt-marionette/actions/workflows/publish.yml)
+[![npm version](https://img.shields.io/npm/v/pi-takt-marionette)](https://www.npmjs.com/package/pi-takt-marionette)
+[![npm downloads](https://img.shields.io/npm/dw/pi-takt-marionette)](https://www.npmjs.com/package/pi-takt-marionette)
+[![License: MIT](https://img.shields.io/github/license/eiei114/pi-takt-marionette)](https://github.com/eiei114/pi-takt-marionette/blob/main/LICENSE)
+![Pi Package](https://img.shields.io/badge/Pi-Package-blue)
+[![Trusted Publishing](https://img.shields.io/badge/npm-provenance-yellow)](https://docs.npmjs.com/generating-provenance-statements)
+
+Pi extension for running and monitoring [TAKT](https://github.com/eiei114/takt)
+projects in stacked live widgets inside the Pi TUI.
 
 ## Status
 
@@ -29,6 +37,7 @@ compact `preparing` card. Final diagnostics remain available through
 ## Install
 
 ```text
+pi install npm:pi-takt-marionette
 pi install git:github.com/eiei114/pi-takt-marionette
 ```
 
