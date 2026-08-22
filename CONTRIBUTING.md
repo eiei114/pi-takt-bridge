@@ -27,7 +27,7 @@ Before opening a PR:
 
 ## Release
 
-Releases publish `pi-takt-bridge` through npm Trusted Publishing. Do not add
+Releases publish `pi-takt-marionette` through npm Trusted Publishing. Do not add
 long-lived npm tokens to GitHub Secrets.
 
 ```bash

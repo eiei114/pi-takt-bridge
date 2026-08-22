@@ -798,7 +798,7 @@ test("repeated background refresh failures use one warning and an xN status coun
     writeFileSync(join(project, ".takt", "runs"), "not a directory", "utf8");
 
     await new Promise((resolve) => setTimeout(resolve, 4_200));
-    const refreshStatuses = context.statuses.filter((status) => status.key === "pi-takt-bridge-refresh-error");
+    const refreshStatuses = context.statuses.filter((status) => status.key === "pi-takt-marionette-refresh-error");
     const refreshWarnings = context.notifications.filter((notification) => notification.message.includes("status refresh failed"));
     assert.match(refreshStatuses.at(-1)?.value ?? "", /\(x2\):/);
     assert.equal(refreshWarnings.length, 1);

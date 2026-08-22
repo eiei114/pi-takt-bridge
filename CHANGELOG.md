@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Rename the package and repository to `pi-takt-marionette` (npm was never
+  published under the old name; GitHub redirects the old URL). Saved profiles
+  and registered projects keep using the stable `pi-takt-bridge` config
+  directory, so existing setups keep working.
 - Redesign the stacked live widget as a marionette-style session list: one row
   per session-owned TAKT process with a rotating braille spinner while actively
   operated, emoji status (🟢 running, ⏳ starting/waiting, ✅ done with duration,

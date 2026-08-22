@@ -18,7 +18,7 @@ target `cwd`, a stable `profile` name, and the intended `preset`:
 ```json
 {
   "profile": "pi-takt-bridge",
-  "cwd": "C:/Users/Keisu/Projects/OSS/pi-takt-bridge",
+  "cwd": "C:/Users/Keisu/Projects/OSS/pi-takt-marionette",
   "preset": "pi-docs",
   "copyGlobalPreset": true
 }

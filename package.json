@@ -1,5 +1,5 @@
 {
-  "name": "pi-takt-bridge",
+  "name": "pi-takt-marionette",
   "version": "0.2.0",
   "description": "Run and monitor TAKT projects in stacked live terminal widgets inside Pi.",
   "type": "module",
@@ -14,12 +14,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/eiei114/pi-takt-bridge"
+    "url": "https://github.com/eiei114/pi-takt-marionette"
   },
   "bugs": {
-    "url": "https://github.com/eiei114/pi-takt-bridge/issues"
+    "url": "https://github.com/eiei114/pi-takt-marionette/issues"
   },
-  "homepage": "https://github.com/eiei114/pi-takt-bridge#readme",
+  "homepage": "https://github.com/eiei114/pi-takt-marionette#readme",
   "files": [
     "extensions/",
     "skills/",

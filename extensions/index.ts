@@ -70,9 +70,9 @@ import {
 import { formatPiModelRef, listPiModels } from "../lib/takt-pi-models.ts";
 import { SearchableListController } from "../lib/takt-search-select.ts";
 
-const WIDGET_KEY = "pi-takt-bridge-projects";
-const STATUS_KEY = "pi-takt-bridge-input-mode";
-const REFRESH_ERROR_STATUS_KEY = "pi-takt-bridge-refresh-error";
+const WIDGET_KEY = "pi-takt-marionette-projects";
+const STATUS_KEY = "pi-takt-marionette-input-mode";
+const REFRESH_ERROR_STATUS_KEY = "pi-takt-marionette-refresh-error";
 const REFRESH_INTERVAL_MS = 2_000;
 const TAKT_INPUT_PROMPT_TIMEOUT_MS = 15_000;
 const TAKT_ASSISTANT_REPLY_TIMEOUT_MS = 120_000;

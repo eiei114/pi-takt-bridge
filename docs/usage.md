@@ -41,7 +41,7 @@ registers the project, and saves a named profile. The equivalent agent tool is
 
 ```json
 {
-  "profile": "pi-takt-bridge",
+  "profile": "pi-takt-marionette",
   "cwd": "C:/work/repo",
   "preset": "pi-docs",
   "copyGlobalPreset": true

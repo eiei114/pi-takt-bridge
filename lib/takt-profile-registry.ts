@@ -23,6 +23,8 @@ export function defaultProfileRegistryPath(env: NodeJS.ProcessEnv = process.env)
   const configRoot = process.platform === "win32"
     ? env.APPDATA || join(homedir(), "AppData", "Roaming")
     : env.XDG_CONFIG_HOME || join(homedir(), ".config");
+  // Stable data directory: intentionally still "pi-takt-bridge" after the
+  // pi-takt-marionette rename so saved profiles/projects keep resolving.
   return join(configRoot, "pi-takt-bridge", PROFILE_FILE);
 }
 

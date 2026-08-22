@@ -1,4 +1,4 @@
-# pi-takt-bridge
+# pi-takt-marionette
 
 Pi extension for running [TAKT](https://github.com/eiei114/takt) without
 leaving the Pi TUI.
@@ -29,13 +29,13 @@ compact `preparing` card. Final diagnostics remain available through
 ## Install
 
 ```text
-pi install git:github.com/eiei114/pi-takt-bridge
+pi install git:github.com/eiei114/pi-takt-marionette
 ```
 
 For local development:
 
 ```text
-pi -e C:/path/to/pi-takt-bridge/extensions/index.ts
+pi -e C:/path/to/pi-takt-marionette/extensions/index.ts
 ```
 
 ## Commands

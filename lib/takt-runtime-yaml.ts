@@ -113,7 +113,7 @@ export function applyStepModelSelections(
   mkdirSync(join(cwd, ".takt"), { recursive: true });
 
   const header = [
-    "# Per-step model assignments managed by pi-takt-bridge (/takt:models).",
+    "# Per-step model assignments managed by pi-takt-marionette (/takt:models).",
     `# Last updated: ${now.toISOString()}`,
     "# Manual entries below are preserved; bridge-generated profiles start with 'bridge-'.",
     "",

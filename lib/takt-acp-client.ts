@@ -91,7 +91,7 @@ export class TaktAcpClient {
     this.child = child;
     const stderr = collectStderr(child);
     const updates: TaktAcpUpdate[] = [];
-    const app = client({ name: "pi-takt-bridge" })
+    const app = client({ name: "pi-takt-marionette" })
       .onNotification(methods.client.session.update, ({ params }) => {
         const update = normalizeAcpUpdate(params);
         updates.push(update);
@@ -112,7 +112,7 @@ export class TaktAcpClient {
           const initialized = await connection.request<InitializeResponse>(methods.agent.initialize, {
             protocolVersion: PROTOCOL_VERSION,
             clientCapabilities: { elicitation: { form: true } },
-            clientInfo: { name: "pi-takt-bridge", version: "0.1.0" },
+            clientInfo: { name: "pi-takt-marionette", version: "0.1.0" },
           });
           if (initialized.protocolVersion !== PROTOCOL_VERSION) {
             throw new Error(`Unsupported ACP protocol version: ${initialized.protocolVersion}`);

@@ -11,5 +11,5 @@ npm run ci
 git diff --check
 ```
 
-Configure npm Trusted Publishing for package `pi-takt-bridge`, repository
-`eiei114/pi-takt-bridge`, workflow `publish.yml`.
+Configure npm Trusted Publishing for package `pi-takt-marionette`, repository
+`eiei114/pi-takt-marionette`, workflow `publish.yml`.
