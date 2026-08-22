@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, closeSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnCommand } from "./process-control.ts";
 import type {
@@ -177,10 +177,18 @@ export interface TaktWorkflowBundleInfo {
   source?: string;
 }
 
+/** Live intra-step phase counts parsed from the run's JSONL log tail. */
+export interface TaktStepPhaseProgress {
+  started: number;
+  completed: number;
+  workers?: { done: number; total: number };
+}
+
 export function snapshotRun(
   meta: TaktRunMeta,
   ownerPid?: number,
   bundleInfo?: TaktWorkflowBundleInfo,
+  livePhases?: TaktStepPhaseProgress,
 ): TaktRunSnapshot {
   const pid = ownerPid ?? meta.ownerPid ?? meta.pid;
   const status = classifyRunStatus(meta, pid);
@@ -192,6 +200,10 @@ export function snapshotRun(
     workflow: meta.workflow,
     ...(bundleInfo?.steps && bundleInfo.steps.length > 0 ? { workflowSteps: [...bundleInfo.steps] } : {}),
     ...(bundleInfo?.source ? { workflowSource: bundleInfo.source } : {}),
+    ...(livePhases?.started ? { stepPhases: { started: livePhases.started, completed: livePhases.completed } } : {}),
+    ...(livePhases?.workers && livePhases.workers.total > 0
+      ? { workers: { ...livePhases.workers } }
+      : {}),
     status,
     sessionStatus,
     ...(pid !== undefined ? { pid } : {}),
@@ -238,7 +250,10 @@ export function readRunSnapshots(cwd: string, taskItems: readonly TaktTaskItem[]
         const bundleInfo = meta.status === "running"
           ? readWorkflowBundleInfo(runCwd, entry.name)
           : undefined;
-        const snapshot = { ...snapshotRun(meta, ownerPid, bundleInfo), workspace: runCwd };
+        const livePhases = meta.status === "running"
+          ? readRunPhaseProgress(runCwd, entry.name)
+          : undefined;
+        const snapshot = { ...snapshotRun(meta, ownerPid, bundleInfo, livePhases), workspace: runCwd };
         const existing = snapshotsBySlug.get(entry.name);
         if (!existing || compareRuns(snapshot, existing) < 0) {
           snapshotsBySlug.set(entry.name, snapshot);
@@ -285,6 +300,116 @@ function readRunWorkspaces(cwd: string): string[] {
     }
   }
   return workspaces;
+}
+
+const PHASE_LOG_TAIL_BYTES = 64 * 1_024;
+
+/**
+ * Parse the run's JSONL log tail for live intra-step phase activity: how many
+ * phase executions started vs completed inside the current step execution, and
+ * parallel worker completion (worker-N style names). Best-effort; any parse
+ * trouble yields undefined and the meter falls back to meta phase only.
+ */
+export function readRunPhaseProgress(cwd: string, runSlug: string): TaktStepPhaseProgress | undefined {
+  try {
+    const logsDirectory = resolve(cwd, ".takt", "runs", runSlug, "logs");
+    if (!existsSync(logsDirectory)) {
+      return undefined;
+    }
+    const logFiles = readdirSync(logsDirectory)
+      .filter((name) => name.endsWith(".jsonl"))
+      .sort();
+    const latest = logFiles.at(-1);
+    if (latest === undefined) {
+      return undefined;
+    }
+    const logPath = resolve(logsDirectory, latest);
+    const size = statSync(logPath).size;
+    let start = 0;
+    const handle = openSync(logPath, "r");
+    let tail: string;
+    try {
+      start = Math.max(0, size - PHASE_LOG_TAIL_BYTES);
+      const length = size - start;
+      const buffer = Buffer.alloc(length);
+      readSync(handle, buffer, 0, length, start);
+      tail = buffer.toString("utf8");
+    } finally {
+      closeSync(handle);
+    }
+
+    const events: Array<Record<string, unknown>> = [];
+    for (const line of tail.split(/\r?\n/).slice(start > 0 ? 1 : 0)) {
+      try {
+        const parsed: unknown = JSON.parse(line);
+        if (isRecord(parsed)) {
+          events.push(parsed);
+        }
+      } catch {
+        // Partial line at the tail boundary or a malformed record; skip it.
+      }
+    }
+
+    // Only count the currently executing step: everything after its step_start.
+    const lastStepStartIndex = findLastIndex(events, (event) => event.type === "step_start");
+    if (lastStepStartIndex < 0) {
+      return undefined;
+    }
+    const started = new Set<string>();
+    const completed = new Set<string>();
+    const workerNames = new Set<string>();
+    const startedIdsByWorkerName = new Map<string, Set<string>>();
+    for (const event of events.slice(lastStepStartIndex + 1)) {
+      const executionId = typeof event.phaseExecutionId === "string" ? event.phaseExecutionId : undefined;
+      const phaseName = typeof event.phaseName === "string" ? event.phaseName : "";
+      if (executionId === undefined) {
+        continue;
+      }
+      if (/^worker/i.test(phaseName)) {
+        workerNames.add(phaseName);
+        let ids = startedIdsByWorkerName.get(phaseName);
+        if (ids === undefined) {
+          ids = new Set<string>();
+          startedIdsByWorkerName.set(phaseName, ids);
+        }
+        ids.add(executionId);
+      }
+      switch (event.type) {
+        case "phase_start":
+          started.add(executionId);
+          break;
+        case "phase_complete":
+          started.add(executionId);
+          completed.add(executionId);
+          break;
+        case "phase_judge_stage":
+          break;
+      }
+    }
+    if (started.size === 0) {
+      return undefined;
+    }
+    const progress: TaktStepPhaseProgress = { started: started.size, completed: completed.size };
+    if (workerNames.size > 1) {
+      const doneWorkers = [...workerNames].filter((name) => {
+        const ids = startedIdsByWorkerName.get(name);
+        return ids !== undefined && ids.size > 0 && [...ids].every((id) => completed.has(id));
+      }).length;
+      progress.workers = { done: Math.min(doneWorkers, workerNames.size), total: workerNames.size };
+    }
+    return progress;
+  } catch {
+    return undefined;
+  }
+}
+
+function findLastIndex<T>(items: readonly T[], predicate: (item: T) => boolean): number {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index])) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 function readWorkflowBundleInfo(cwd: string, runSlug: string): TaktWorkflowBundleInfo | undefined {

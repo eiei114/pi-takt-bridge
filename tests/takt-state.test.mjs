@@ -341,3 +341,30 @@ test("resolveCommand uses npm shims on Windows without changing explicit paths",
   assert.match(resolveCommand("C:/tools/takt"), /C:\/tools\/takt$/);
   assert.equal(usesWindowsShell("takt.cmd"), process.platform === "win32");
 });
+
+test("readRunPhaseProgress counts live phases and workers from the log tail", async () => {
+  const { readRunPhaseProgress } = await import("../lib/takt-state.ts");
+  const cwd = mkdtempSync(join(tmpdir(), "pi-takt-bridge-phase-log-"));
+  const slug = "20260822-run";
+  const logsDirectory = join(cwd, ".takt", "runs", slug, "logs");
+  mkdirSync(logsDirectory, { recursive: true });
+  const events = [
+    { type: "workflow_start" },
+    { type: "step_start", step: "plan" },
+    { type: "phase_start", phaseExecutionId: "old-1", phaseName: "execute" },
+    { type: "step_start", step: "implement" },
+    { type: "phase_start", phaseExecutionId: "w1:a", phaseName: "worker-1" },
+    { type: "phase_start", phaseExecutionId: "w2:a", phaseName: "worker-2" },
+    { type: "phase_complete", phaseExecutionId: "w1:a", phaseName: "worker-1" },
+    { type: "phase_judge_stage", phaseExecutionId: "w2:a", phaseName: "worker-2" },
+  ];
+  writeFileSync(join(logsDirectory, "run.jsonl"), events.map((e) => JSON.stringify(e)).join("\n"), "utf8");
+
+  const progress = readRunPhaseProgress(cwd, slug);
+  assert.equal(progress?.started, 2);
+  assert.equal(progress?.completed, 1);
+  assert.deepEqual(progress?.workers, { done: 1, total: 2 });
+
+  // A run without any log file yields nothing.
+  assert.equal(readRunPhaseProgress(cwd, "missing-slug"), undefined);
+});

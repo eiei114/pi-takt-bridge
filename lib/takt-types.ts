@@ -66,6 +66,10 @@ export interface TaktRunSnapshot {
   workflowSteps?: string[];
   /** Workflow source layer from the run bundle manifest: builtin, user, project, or repertoire. */
   workflowSource?: string;
+  /** Live phase execution counts for the active step, parsed from the run's JSONL log tail. */
+  stepPhases?: { started: number; completed: number };
+  /** Parallel worker completion inside the active step, when workers are detected. */
+  workers?: { done: number; total: number };
   status: TaktStatus;
   sessionStatus: TaktSessionStatus;
   pid?: number;

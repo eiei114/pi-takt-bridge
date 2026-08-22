@@ -435,3 +435,18 @@ test("active rows show a file-unit sub-line extracted from the owned PTY", async
   assert.ok(lines.some((line) => line.startsWith("└ 📄 ") && line.includes("lib/takt-progress.ts")), JSON.stringify(lines));
   liveTerminal.dispose();
 });
+
+test("meter prefers measured phase completions over the meta phase", async () => {
+  const { stepMeter } = await import("../lib/takt-live-panel.ts");
+  const steps = ["plan", "implement", "verify"];
+  const now = Date.parse("2026-08-20T00:00:00.000Z");
+
+  // Meta says p1 (33% of the step) but 4 of 4 log phases completed → next cell.
+  const measured = stepMeter({
+    workflowSteps: steps,
+    currentStep: "implement",
+    phase: 1,
+    stepPhases: { started: 4, completed: 4 },
+  }, now);
+  assert.equal(measured, "█".repeat(6) + (Math.floor(now / 120) % 2 === 0 ? "▓" : "▒") + "░".repeat(3));
+});

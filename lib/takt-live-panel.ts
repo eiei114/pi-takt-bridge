@@ -285,12 +285,15 @@ function describeActiveRun(run: TaktRunSnapshot): string {
   const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
   const currentIndex = run.currentStep ? steps.indexOf(run.currentStep) : -1;
   const position = currentIndex >= 0 ? ` ${currentIndex + 1}/${steps.length}` : "";
+  const workerSuffix = run.workers && run.workers.total > 0
+    ? ` w${run.workers.done}/${run.workers.total}`
+    : "";
   const phaseSuffix = run.phase
-    ? ` · p${run.phase}/3`
+    ? ` p${run.phase}/3`
     : "";
   const iterationSuffix = run.currentIteration !== undefined ? ` i${run.currentIteration}` : "";
   const stepName = run.currentStep ?? "working";
-  return `🔨 ${stepName}${position}${phaseSuffix}${iterationSuffix}`;
+  return `🔨 ${stepName}${position}${workerSuffix} ${phaseSuffix}${iterationSuffix}`.replaceAll("  ", " ").trimEnd();
 }
 
 const STEP_METER_CELLS = 10;
@@ -302,7 +305,7 @@ const STEP_METER_CELLS = 10;
  * with the spinner tick so an operated session visibly breathes.
  */
 export function stepMeter(
-  run: Pick<TaktRunSnapshot, "workflowSteps" | "currentStep" | "phase">,
+  run: Pick<TaktRunSnapshot, "workflowSteps" | "currentStep" | "phase" | "stepPhases">,
   nowMs = Date.now(),
 ): string {
   const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
@@ -313,8 +316,14 @@ export function stepMeter(
   if (currentIndex < 0) {
     return "░".repeat(STEP_METER_CELLS);
   }
-  const phaseFraction = ((run.phase ?? 1) - 1) / 3;
-  const progress = (currentIndex + phaseFraction) / steps.length;
+  // Prefer measured phase completions from the run log tail; fall back to the
+  // meta phase when the tail has no usable events yet.
+  let intraFraction = ((run.phase ?? 1) - 1) / 3;
+  const phases = run.stepPhases;
+  if (phases && phases.started > 0) {
+    intraFraction = Math.min(1, phases.completed / phases.started);
+  }
+  const progress = (currentIndex + intraFraction) / steps.length;
   const filled = Math.min(STEP_METER_CELLS - 1, Math.floor(progress * STEP_METER_CELLS));
   const pulse = Math.floor(Math.max(0, nowMs) / SPINNER_INTERVAL_MS) % 2 === 0 ? "▓" : "▒";
   return `${"█".repeat(filled)}${pulse}${"░".repeat(STEP_METER_CELLS - filled - 1)}`;
