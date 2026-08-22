@@ -20,8 +20,10 @@ test("parseTaktInputMode accepts mode names and cycle aliases", () => {
   assert.equal(parseTaktInputMode("nope"), undefined);
 });
 
-test("formatTaktInputModeLine marks the active mode", () => {
-  assert.equal(formatTaktInputModeLine("takt"), "pi | [takt] | pi-auto");
+test("formatTaktInputModeLine states where keys go in plain words", () => {
+  assert.match(formatTaktInputModeLine("pi"), /mode pi/);
+  assert.match(formatTaktInputModeLine("takt"), /keys go to TAKT/);
+  assert.match(formatTaktInputModeLine("pi-auto"), /Pi drives TAKT/);
 });
 
 test("isDestructiveTaktAutoInput gates clear/stop style follow-ups", () => {

@@ -98,9 +98,9 @@ test("project stack shows session-owned rows with spinner and hides raw output",
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
   ], 60, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
 
-  assert.ok(lines[0]?.includes("input:") && lines[0]?.includes("[pi]"));
+  assert.ok(lines[0]?.includes("mode pi"), String(lines[0]));
   // Marionette header with the owned-session count.
-  assert.ok(lines.some((line) => line.includes("🎭 TAKT · 1 string")));
+  assert.ok(lines.some((line) => line.includes("🎭 TAKT · 1 session")));
   // Externally started projects never render here...
   assert.ok(lines.every((line) => !line.includes("repo-b")));
   // ...and raw PTY output stays out of the default widget.
@@ -112,7 +112,7 @@ test("project stack shows session-owned rows with spinner and hides raw output",
   const autoLines = renderTaktProjectStack([
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
   ], 30, "pi-auto");
-  assert.ok(autoLines[0]?.includes("[pi-auto]"));
+  assert.ok(autoLines[0]?.includes("pi-auto"));
   liveTerminal.dispose();
 });
 
@@ -164,8 +164,8 @@ test("project stack keeps requesting renders while a live PTY screen changes", a
 
 test("project stack shows input mode even with no active sessions", () => {
   const lines = renderTaktProjectStack([], 40, "takt");
-  assert.equal(lines[0], "input: pi | [takt] | pi-auto");
-  assert.ok(lines.some((line) => line.includes("no active strings")));
+  assert.match(lines[0] ?? "", /mode takt/);
+  assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
 test("project stack hides quiet observed pending activity after the inactivity TTL", () => {
@@ -190,7 +190,7 @@ test("project stack hides quiet observed pending activity after the inactivity T
 
   const lines = renderTaktProjectStack([project], 80, "pi", { now });
   assert.ok(lines.every((line) => !line.includes("[pending]")));
-  assert.ok(lines.some((line) => line.includes("no active strings")));
+  assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
 test("project stack hides observed pending activity entirely; use /takt:status instead", () => {
@@ -215,7 +215,7 @@ test("project stack hides observed pending activity entirely; use /takt:status i
 
   assert.ok(lines.every((line) => !line.includes("[pending]")));
   assert.ok(lines.every((line) => !line.includes("1 pending")));
-  assert.ok(lines.some((line) => line.includes("no active strings")));
+  assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
 test("project stack hides bridge sessions after stop, failure, or natural completion", () => {
@@ -231,7 +231,7 @@ test("project stack hides bridge sessions after stop, failure, or natural comple
       { id: "finished", label: "finished", cwd: "C:/finished", runner, stage },
     ], 40);
     assert.ok(lines.every((line) => !line.includes("[finished]")));
-    assert.ok(lines.some((line) => line.includes("no active strings")));
+    assert.ok(lines.some((line) => line.includes("no active sessions")));
   }
 });
 
@@ -367,8 +367,8 @@ test("project stack truncates long auto-generated workflow names in rows", () =>
   }], 90, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
 
   const row = lines.at(-1) ?? "";
-  assert.ok(row.includes("exec-20260822-025402-…"));
-  assert.ok(!row.includes("use-the-trial-marionette-workf"));
+  assert.ok(row.includes("exec@02:54"), row);
+  assert.ok(!row.includes("exec-20260822"));
 });
 
 

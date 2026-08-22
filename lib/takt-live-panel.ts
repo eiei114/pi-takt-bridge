@@ -246,13 +246,13 @@ export function renderTaktProjectStack(
   if (visibleProjects.length === 0) {
     return fitTaktWidgetLines([
       `input: ${formatTaktInputModeLine(inputMode)}`,
-      "🎭 TAKT · no active strings",
+      "🎭 TAKT · no active sessions",
     ], columns);
   }
 
   const lines: string[] = [
     `input: ${formatTaktInputModeLine(inputMode)}`,
-    `🎭 TAKT · ${visibleProjects.length} string${visibleProjects.length === 1 ? "" : "s"}`,
+    `🎭 TAKT · ${visibleProjects.length} session${visibleProjects.length === 1 ? "" : "s"} · ${summaryCounts(visibleProjects)}`,
   ];
   for (const project of visibleProjects) {
     if (lines.length >= MAX_STACK_ROWS - 1 && visibleProjects.indexOf(project) < visibleProjects.length - 1) {
@@ -270,8 +270,9 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   const run = findActiveRun(project.summary);
   const hb = heartbeat(run, project.runner?.lastOutputAt, now);
   const spin = taktSpinnerFrame(now, hb.intervalMs);
-  // Auto-generated exec workflow names get long; cap them so the row stays readable.
-  const workflow = run !== undefined ? truncateInline(workflowLabel(run), 22) : undefined;
+  // Auto-generated exec workflow names get long and unreadable; show the
+  // launch time instead (exec@05:15) or cap project-defined names.
+  const workflow = run !== undefined ? prettyWorkflowName(workflowLabel(run)) : undefined;
   const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
   // Bridge lifecycle states that precede or wrap the actual TAKT run.
   if (project.stage === "clearing") {
@@ -378,6 +379,34 @@ function isTerminalProjectStage(stage: TaktExecStage | undefined): boolean {
 export function fitTaktWidgetLines(lines: readonly string[], width: number): string[] {
   const columns = normalizeWidgetWidth(width);
   return lines.map((line) => truncateToWidth(line, columns));
+}
+
+const EXEC_NAME_PATTERN = /^exec-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-/;
+
+/** `exec-20260822-051544-…` → `exec@05:15`; other names pass through capped. */
+export function prettyWorkflowName(name: string): string {
+  const match = EXEC_NAME_PATTERN.exec(name);
+  if (match !== null) {
+    return `exec@${match[4]}:${match[5]}`;
+  }
+  return truncateInline(name, 22);
+}
+
+/** Compact running/done counts for the header line. */
+function summaryCounts(projects: readonly TaktProjectWidgetEntry[]): string {
+  let running = 0;
+  let done = 0;
+  for (const project of projects) {
+    if (isPreparingProject(project)) continue;
+    const run = findActiveRun(project.summary);
+    if (run !== undefined && isActiveRunState(run)) running += 1;
+    else done += 1;
+  }
+  if (running === 0 && done === 0) return "idle";
+  const parts: string[] = [];
+  if (running > 0) parts.push(`▶${running}`);
+  if (done > 0) parts.push(`✓${done}`);
+  return parts.join(" ");
 }
 
 function isPreparingProject(project: TaktProjectWidgetEntry): boolean {

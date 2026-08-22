@@ -28,9 +28,15 @@ export function parseTaktInputMode(value: string | undefined): TaktInputMode | "
 
 /** Compact widget/status label for the three-state cycle. */
 export function formatTaktInputModeLine(mode: TaktInputMode): string {
-  return TAKT_INPUT_MODES
-    .map((candidate) => (candidate === mode ? `[${candidate}]` : candidate))
-    .join(" | ");
+  // One glance should answer "where do my keystrokes go right now?".
+  switch (mode) {
+    case "pi":
+      return "⌨️ mode pi · you are typing in Pi · Ctrl+Alt+T switches";
+    case "takt":
+      return "⌨️ mode takt · keys go to TAKT · Esc returns to Pi";
+    case "pi-auto":
+      return "⌨️ mode pi-auto · Pi drives TAKT · Ctrl+Alt+T switches";
+  }
 }
 
 /** Human-readable mode description for notifications. */
