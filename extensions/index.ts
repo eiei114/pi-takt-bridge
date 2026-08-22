@@ -377,8 +377,14 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
     }
     const runtimeRef = this;
     if (typeof context.ui.addAutocompleteProvider !== "function") {
+      context.ui.notify("TAKT: addAutocompleteProvider unavailable; @ mention skipped.", "info");
       return;
     }
+    const knownCount = this.sessionCompletionEntries().length;
+    context.ui.notify(
+      `TAKT @ mention registered (${knownCount} session(s) eligible).`,
+      "info",
+    );
     context.ui.addAutocompleteProvider((current) => ({
       triggerCharacters: ["@"],
       async getSuggestions(lines, cursorLine, cursorCol, options) {
