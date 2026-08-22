@@ -106,14 +106,12 @@ leaving Pi:
   inspect with `takt_read_screen` and send follow-ups with `takt_send_input`
   (destructive input still confirms)
 
-The current Pi folder plus registered folders are monitored. Active project
-screens are stacked above the normal Pi editor, with the most active project
-first. Bridge-owned PTYs show raw TAKT output. A TAKT process started in another
-terminal can be detected from its `.takt` state, but its original PTY cannot be
-attached safely; that project is shown as an external status card instead.
-External pending/blocked/failed/stale cards are hidden after 30 minutes without
-new activity. This only cleans the Pi display; it never deletes TAKT tasks or
-run history automatically.
+The current Pi folder plus registered folders are monitored. The stacked live
+widget is a session-owned view: it shows only TAKT processes launched from this
+Pi session, with the most active project first. A TAKT process started in
+another terminal or another Pi session is never displayed automatically; inspect
+it explicitly with `/takt:status [path]` or `takt_read_screen`. This only cleans
+the Pi display; it never deletes TAKT tasks or run history automatically.
 The bridge only stops PTYs it created, and bounded stop failures are reported
 instead of retried indefinitely.
 

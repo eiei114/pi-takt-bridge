@@ -15,8 +15,6 @@ import {
 } from "./takt-input-mode.ts";
 import { renderTaktWorkflowProgress } from "./takt-progress.ts";
 import {
-  formatTaktLastExit,
-  hasRecentTaktSummaryActivity,
   hasTaktSummaryActivity,
   type TaktRunSnapshot,
   type TaktSummary,
@@ -176,7 +174,11 @@ export function renderTaktProjectStack(
 ): string[] {
   const columns = normalizeWidgetWidth(width);
   const now = options.now ?? Date.now();
+  // The live widget is a session-owned view: only projects whose TAKT process
+  // was launched from THIS Pi session render here. External activity stays
+  // available through explicit diagnostics (/takt:status, takt_read_screen).
   const displayableProjects = [...projects]
+    .filter(hasOwnedRunner)
     .filter((project) => isDisplayableProject(project, now))
     .sort(compareProjectActivity);
   const currentIsPreparing = displayableProjects.some(isPreparingProject);
@@ -207,8 +209,6 @@ export function renderTaktProjectStack(
         renderTaktTerminal(runner.terminal),
         Math.max(1, MAX_PROJECT_ROWS - panel.length),
       ));
-    } else if (project.summary) {
-      panel.push(...renderObservedProject(project.summary, columns));
     } else {
       panel.push("waiting for TAKT activity...");
     }
@@ -237,20 +237,19 @@ export function renderTaktProjectStack(
   return fitTaktWidgetLines(lines, columns);
 }
 
-/**
- * Finished bridge-owned sessions must not keep the live widget mounted.
- * Their diagnostics remain available through `takt_read_screen` and
- * `/takt:status`, but the terminal panel itself is an active-session view.
- */
 function isDisplayableProject(project: TaktProjectWidgetEntry, now: number): boolean {
   if (isTerminalProjectStage(project.stage)) {
     return false;
   }
   return Boolean(
     project.runner?.isRunning ||
-    hasRecentTaktSummaryActivity(project.summary, now) ||
     (!project.runner?.hasSession && project.stage !== undefined && project.stage !== "idle"),
   );
+}
+
+/** True when this Pi session owns the TAKT process behind the entry. */
+function hasOwnedRunner(project: TaktProjectWidgetEntry): boolean {
+  return Boolean(project.runner?.hasSession || project.runner?.isRunning);
 }
 
 function isTerminalProjectStage(stage: TaktExecStage | undefined): boolean {
@@ -289,35 +288,6 @@ function renderPromptOverlay(project: TaktProjectWidgetEntry, progress?: string)
     "prompt preview:",
     ...preview.split("\n").slice(0, MAX_PROJECT_ROWS - 3),
   ];
-}
-
-function renderObservedProject(summary: TaktSummary, width = DEFAULT_COLUMNS): string[] {
-  const lines = [
-    `status: ${summary.status}`,
-    `counts: ${summary.running} running · ${summary.pending} pending · ${summary.blocked} blocked · ${summary.failed} failed · ${summary.stale} stale`,
-  ];
-  const progress = renderTaktWorkflowProgress({
-    run: findActiveRun(summary),
-    width,
-  });
-  if (progress) {
-    lines.push(progress);
-  }
-  if (summary.pid !== undefined) {
-    lines.push(`pid: ${summary.pid}`);
-  }
-  if (summary.stage) {
-    lines.push(`stage: ${summary.stage}`);
-  }
-  if (summary.lastExit) {
-    lines.push(`lastExit: ${formatTaktLastExit(summary.lastExit)}`);
-  }
-  const run = summary.runs[0];
-  if (run) {
-    lines.push(`↳ ${run.sessionStatus}: ${run.task}${run.currentStep ? ` · ${run.currentStep}` : ""}`);
-  }
-  lines.push("↳ external TAKT session: raw PTY screen unavailable");
-  return lines.slice(0, MAX_PROJECT_ROWS - 1);
 }
 
 function findActiveRun(summary: TaktSummary | undefined): TaktRunSnapshot | undefined {

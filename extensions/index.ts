@@ -52,7 +52,6 @@ import {
 } from "../lib/takt-state.ts";
 import {
   formatTaktLastExit,
-  hasRecentTaktSummaryActivity,
   type TaktLastExit,
   type TaktSessionStatus,
   type TaktSummary,
@@ -1702,9 +1701,12 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   private hasDisplayableProject(): boolean {
+    // Session-owned view only: externally started TAKT activity must not mount
+    // or keep the live widget here. Explicit diagnostics (/takt:status,
+    // takt_read_screen) remain available for external runs.
     return [...this.projects.values()].some((project) =>
       !isTerminalProjectStage(project.stage) &&
-      (project.runner.isRunning || hasRecentTaktSummaryActivity(project.summary)),
+      (project.runner.isRunning || project.runner.hasSession),
     );
   }
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make the stacked live widget a session-owned view: it renders only TAKT
+  processes launched from the current Pi session. TAKT activity started in
+  other terminals or other Pi sessions no longer mounts or populates the widget;
+  inspect it explicitly with `/takt:status [path]` or `takt_read_screen`.
 - Add `/takt:models [workflow]`: pick a Pi model per workflow step through
   type-to-filter dialogs and merge the result into the project's
   `.takt/runtime.yaml` as runtime-v1 profiles plus `<workflow>/<step>`

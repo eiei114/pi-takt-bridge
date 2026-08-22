@@ -72,7 +72,7 @@ test("live widget keeps Pi focus and shows the current TAKT screen", async () =>
   terminal.dispose();
 });
 
-test("project stack keeps live screens and external project status together", async () => {
+test("project stack shows only session-owned TAKT; external projects need explicit diagnostics", async () => {
   const liveTerminal = new Terminal({ cols: 30, rows: 8, allowProposedApi: true });
   await new Promise((resolve) => liveTerminal.write("repo-a live output", resolve));
   const liveRunner = {
@@ -99,9 +99,12 @@ test("project stack keeps live screens and external project status together", as
   ], 30);
 
   assert.ok(lines[0]?.includes("input:") && lines[0]?.includes("[pi]"));
-  assert.ok(lines.findIndex((line) => line.includes("[repo-a]")) < lines.findIndex((line) => line.includes("[repo-b]")));
+  // The externally started project never renders in this session's widget...
+  assert.ok(lines.every((line) => !line.includes("[repo-b]")));
+  assert.ok(lines.some((line) => !line.includes("external TAKT session")));
+  // ...while the session-owned live screen stays visible.
+  assert.ok(lines.some((line) => line.includes("[repo-a]")));
   assert.ok(lines.some((line) => line.includes("repo-a live output")));
-  assert.ok(lines.some((line) => line.includes("external TAKT session")));
 
   const autoLines = renderTaktProjectStack([
     { id: "a", label: "repo-a", cwd: "C:/repo-a", runner: liveRunner },
@@ -185,7 +188,7 @@ test("project stack hides quiet observed pending activity after the inactivity T
   assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
-test("project stack keeps fresh observed pending activity visible", () => {
+test("project stack hides observed pending activity entirely; use /takt:status instead", () => {
   const now = Date.parse("2026-08-14T01:00:00.000Z");
   const lines = renderTaktProjectStack([{
     id: "pending",
@@ -205,8 +208,9 @@ test("project stack keeps fresh observed pending activity visible", () => {
     },
   }], 80, "pi", { now });
 
-  assert.ok(lines.some((line) => line.includes("[pending]")));
-  assert.ok(lines.some((line) => line.includes("0 running · 1 pending · 0 blocked · 0 failed · 0 stale")));
+  assert.ok(lines.every((line) => !line.includes("[pending]")));
+  assert.ok(lines.every((line) => !line.includes("1 pending")));
+  assert.ok(lines.some((line) => line.includes("no active sessions")));
 });
 
 test("project stack hides bridge sessions after stop, failure, or natural completion", () => {
@@ -312,17 +316,13 @@ test("project stack truncates long paths to the Pi widget width", () => {
       id: "long-path",
       label: "pi-docs",
       cwd: "C:/Users/Keisu/Projects/OSS/takt",
-      summary: {
-        cwd: "C:/Users/Keisu/Projects/OSS/takt",
-        status: "live",
-        running: 1,
-        pending: 0,
-        blocked: 0,
-        failed: 0,
-        completed: 0,
-        stale: 0,
-        runs: [{ slug: "run", task: "docs", workflow: "default", status: "running", sessionStatus: "live" }],
+      runner: {
+        terminal: undefined,
+        hasSession: true,
+        isRunning: true,
+        resize() {},
       },
+      stage: "running",
     },
   ], width);
 

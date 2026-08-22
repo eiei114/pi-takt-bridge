@@ -159,8 +159,9 @@ provider.
 The extension only controls child processes it started. A `takt run` or
 `takt exec` process started in another terminal is observed through `.takt`
 metadata once it creates a run, but Pi cannot safely attach to that terminal's
-raw PTY. Such a project is shown as an external status card and is never killed
-by Pi.
+raw PTY. Such external activity never renders in the live widget automatically;
+inspect it explicitly with `/takt:status [path]` or `takt_read_screen`, and Pi
+still never kills it.
 
 ## Interactive `takt exec`
 
@@ -210,12 +211,12 @@ space. While a bridge-owned PTY is active, the widget also performs a lightweigh
 screen events are coalesced.
 
 The background project-stack refresh reads persistent `.takt/runs` metadata and
-does not invoke `takt list`. Running work remains visible; pending, blocked,
-failed, and stale run observations are hidden after 30 minutes without
-activity. Queue reconciliation is an on-demand diagnostic operation, so
-`/takt:status` and explicit task lifecycle operations may show queue counts
-that are not present on a run-only external card. This is presentation cleanup
-only: the bridge does not delete `.takt/tasks.yaml` entries or run history, so a
+does not invoke `takt list`. The stacked widget itself only renders TAKT
+processes owned by this Pi session; observed pending, blocked, failed, and stale
+activity from other sessions stays out of the widget entirely. Queue
+reconciliation is an on-demand diagnostic operation, so `/takt:status` may show
+queue counts that the widget never displays. This is presentation cleanup only:
+the bridge does not delete `.takt/tasks.yaml` entries or run history, so a
 pending task can still be inspected and deliberately removed with TAKT's own
 task-management flow.
 
