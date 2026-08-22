@@ -210,8 +210,22 @@ export function renderTaktProjectStack(
       break;
     }
     lines.push(sessionRow(project, columns, now));
+    const activeFile = activeFilePathLine(project);
+    if (activeFile !== undefined && lines.length < MAX_STACK_ROWS - 1) {
+      lines.push(activeFile);
+    }
   }
   return fitTaktWidgetLines(lines, columns);
+}
+
+/** Dim `📄 path` sub-line under an actively operated session with a fresh hit. */
+function activeFilePathLine(project: TaktProjectWidgetEntry): string | undefined {
+  const run = findActiveRun(project.summary);
+  if (!run || !isActiveRunState(run) || project.runner?.terminal === undefined) {
+    return undefined;
+  }
+  const path = extractLatestFilePath(project.runner.terminal);
+  return path !== undefined ? `└ 📄 ${path}` : undefined;
 }
 
 /** One compact row per session: spinner + status emoji + label + run state. */
@@ -222,7 +236,6 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   // Auto-generated exec workflow names get long; cap them so the row stays readable.
   const workflow = run !== undefined ? truncateInline(workflowLabel(run), 22) : undefined;
   const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
-
   // Bridge lifecycle states that precede or wrap the actual TAKT run.
   if (project.stage === "clearing") {
     return `${spin} 🟡 ${project.label}${workflowTag} — clearing previous session`;
@@ -248,7 +261,7 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   }
 
   if (run && isActiveRunState(run)) {
-    return `${spin} 🟢 ${project.label}${workflowTag} — ${describeActiveRun(run)}`;
+    return `${spin} 🟢 ${project.label}${workflowTag} ${stepMeter(run)} ${describeActiveRun(run)}`;
   }
 
   if (project.stage === "failed") {
@@ -278,6 +291,74 @@ function describeActiveRun(run: TaktRunSnapshot): string {
   const iterationSuffix = run.currentIteration !== undefined ? ` i${run.currentIteration}` : "";
   const stepName = run.currentStep ?? "working";
   return `🔨 ${stepName}${position}${phaseSuffix}${iterationSuffix}`;
+}
+
+const STEP_METER_CELLS = 10;
+
+/**
+ * Sub-step progress meter: completed workflow steps fill cells fully and the
+ * active step fills by its phase (execute → report → judge), so the bar moves
+ * inside a step instead of only when steps change.
+ */
+export function stepMeter(run: Pick<TaktRunSnapshot, "workflowSteps" | "currentStep" | "phase">): string {
+  const steps = run.workflowSteps?.filter((step) => step.length > 0) ?? [];
+  if (steps.length === 0) {
+    return "";
+  }
+  const currentIndex = run.currentStep ? steps.indexOf(run.currentStep) : -1;
+  if (currentIndex < 0) {
+    return `[${"-".repeat(STEP_METER_CELLS)}]`;
+  }
+  const phaseFraction = ((run.phase ?? 1) - 1) / 3;
+  const progress = (currentIndex + phaseFraction) / steps.length;
+  const filled = Math.min(STEP_METER_CELLS - 1, Math.floor(progress * STEP_METER_CELLS));
+  return `[${"#".repeat(filled)}>${"-".repeat(STEP_METER_CELLS - filled)}]`;
+}
+
+/** File-path-like token used to surface what the worker is touching right now. */
+const FILE_PATH_PATTERN = /[A-Za-z0-9_.-]+(?:[\\/][A-Za-z0-9_.-]+)+\.[A-Za-z0-9]{1,6}/g;
+const FILE_SCAN_ROWS = 60;
+
+/**
+ * Best-effort file-unit signal: scan the owned PTY screen backwards for the
+ * most recent path-looking token. Heuristic and stateless; hidden whenever no
+ * plausible path appears on screen.
+ */
+export function extractLatestFilePath(terminal: Terminal): string | undefined {
+  const buffer = terminal.buffer.active;
+  const startRow = Math.max(0, buffer.cursorY + 1 - FILE_SCAN_ROWS);
+  for (let row = buffer.cursorY; row >= startRow; row -= 1) {
+    const line = buffer.getLine(row);
+    if (!line) {
+      continue;
+    }
+    let text = "";
+    for (let column = 0; column < terminal.cols; column += 1) {
+      text += buffer.getLine(row)?.getCell(column)?.getChars() ?? "";
+    }
+    const matches = text.match(FILE_PATH_PATTERN);
+    if (!matches || matches.length === 0) {
+      continue;
+    }
+    const candidate = [...matches]
+      .reverse()
+      .find((path) => isPlausibleActivityPath(path));
+    if (candidate !== undefined) {
+      return truncateInline(candidate, 34);
+    }
+  }
+  return undefined;
+}
+
+function isPlausibleActivityPath(path: string): boolean {
+  if (/^(?:node_modules|\.git|\.takt)[\\/]/i.test(path)) {
+    return false;
+  }
+  if (/^https?:$/i.test(path)) {
+    return false;
+  }
+  // Widget chrome like pi-takt-marionette-refresh-error has no real extension.
+  return /\.[A-Za-z0-9]{1,6}$/.test(path) && !path.endsWith(".png)") ;
 }
 
 function truncateInline(value: string, maxLength: number): string {

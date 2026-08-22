@@ -113,19 +113,23 @@ TAKT process launched from this Pi session, with the most active first —
 
 ```
 🎭 TAKT · 3 strings
-⠋ 🟢 repo-a · dual    🔨 implement 2/3 · p1 execute
-⠋ 🔵 repo-c · simple  🔍 review 3/3
+⠋ 🟢 repo-a · dual    [###>-------] 🔨 implement 2/3 · p1/3 i2
+└ 📄 lib/takt-state.ts
 ✅ repo-b · default    done · 12m
 ```
 
 A rotating braille spinner means the session is actively operated; completed
 and failed sessions stop spinning (`✅` done, `🔴 … ❌ failed` plus an error
-snippet). Raw PTY output is never shown by default: peek it explicitly with
-`/takt:live [path]` or `/takt:sessions`, or inspect external runs (other
-terminals or other Pi sessions) via `/takt:status [path]` or `takt_read_screen`.
-This only cleans the Pi display; it never deletes TAKT tasks or run history
-automatically. The bridge only stops PTYs it created, and bounded stop failures
-are reported instead of retried indefinitely.
+snippet). The meter fills by completed workflow steps and moves inside the
+active step through its execute → report → judge phases. Under active rows,
+a dim `📄 <path>` line surfaces the most recent file-like path seen on the
+session's own screen (heuristic, stateless). Raw PTY output is never shown by
+default: peek it explicitly with `/takt:live [path]` or `/takt:sessions`, or
+inspect external runs (other terminals or other Pi sessions) via
+`/takt:status [path]` or `takt_read_screen`. This only cleans the Pi display;
+it never deletes TAKT tasks or run history automatically. The bridge only stops
+PTYs it created, and bounded stop failures are reported instead of retried
+indefinitely.
 
 Default mode keeps Pi focused. Use `/takt:mode` or `Ctrl+Alt+T` when you want
 direct TAKT focus or Pi-auto follow-ups.
