@@ -338,3 +338,35 @@ test("project stack truncates long paths to the Pi widget width", () => {
     assert.ok(visibleWidth(line) <= width, `line ${index} exceeds ${width}: ${visibleWidth(line)} columns`);
   }
 });
+
+test("project stack truncates long auto-generated workflow names in rows", () => {
+  const lines = renderTaktProjectStack([{
+    id: "a",
+    label: "pg",
+    cwd: "C:/pg",
+    runner: { terminal: undefined, hasSession: true, isRunning: true, resize() {} },
+    stage: "running",
+    summary: {
+      cwd: "C:/pg",
+      status: "live",
+      running: 1,
+      pending: 0,
+      blocked: 0,
+      failed: 0,
+      completed: 0,
+      stale: 0,
+      runs: [{
+        slug: "r",
+        task: "t",
+        workflow: "exec-20260822-025402-use-the-trial-marionette-workf-fs36gxyz",
+        status: "running",
+        sessionStatus: "live",
+        currentStep: "plan",
+      }],
+    },
+  }], 90, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
+
+  const row = lines.at(-1) ?? "";
+  assert.ok(row.includes("exec-20260822-025402-…"));
+  assert.ok(!row.includes("use-the-trial-marionette-workf"));
+});

@@ -219,7 +219,8 @@ function sessionRow(project: TaktProjectWidgetEntry, width: number, now: number)
   void width;
   const spin = taktSpinnerFrame(now);
   const run = findActiveRun(project.summary);
-  const workflow = run !== undefined ? workflowLabel(run) : undefined;
+  // Auto-generated exec workflow names get long; cap them so the row stays readable.
+  const workflow = run !== undefined ? truncateInline(workflowLabel(run), 22) : undefined;
   const workflowTag = workflow !== undefined ? ` · ${workflow}` : "";
 
   // Bridge lifecycle states that precede or wrap the actual TAKT run.
