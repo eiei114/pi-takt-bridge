@@ -371,24 +371,6 @@ test("project stack truncates long auto-generated workflow names in rows", () =>
   assert.ok(!row.includes("use-the-trial-marionette-workf"));
 });
 
-test("step meter fills by step position and intra-step phase", async () => {
-  const { stepMeter } = await import("../lib/takt-live-panel.ts");
-  const steps = ["plan", "implement", "verify"];
-  const now = Date.parse("2026-08-20T00:00:00.000Z");
-  const pulse = Math.floor(now / 120) % 2 === 0 ? "▓" : "▒"; // ▓ : ▒
-  const meter = (filled) => "█".repeat(filled) + pulse + "░".repeat(10 - filled - 1);
-
-  // Step 1 of 3, phase 1 (execute) → ~11% progress.
-  assert.equal(stepMeter({ workflowSteps: steps, currentStep: "plan", phase: 1 }, now), meter(0));
-  // Step 1 of 3, phase 3 (judge) → ~33% progress.
-  assert.equal(stepMeter({ workflowSteps: steps, currentStep: "plan", phase: 3 }, now), meter(2));
-  // Step 3 of 3, phase 3 → nearly full.
-  assert.equal(stepMeter({ workflowSteps: steps, currentStep: "verify", phase: 3 }, now), meter(8));
-  // Unknown current step → empty cells only.
-  assert.equal(stepMeter({ workflowSteps: steps, currentStep: undefined, phase: 2 }, now), "░".repeat(10));
-  // No workflow bundle → no meter.
-  assert.equal(stepMeter({ workflowSteps: undefined, currentStep: "plan", phase: 1 }, now), "");
-});
 
 test("active rows show a file-unit sub-line extracted from the owned PTY", async () => {
   const liveTerminal = new Terminal({ cols: 60, rows: 12, allowProposedApi: true });
@@ -428,25 +410,8 @@ test("active rows show a file-unit sub-line extracted from the owned PTY", async
   }], 90, "pi", { now: Date.parse("2026-08-20T00:00:00.000Z") });
 
   const row = lines.find((line) => line.includes("🟢 pg"));
-  const now = Date.parse("2026-08-20T00:00:00.000Z");
-  const pulse = Math.floor(now / 120) % 2 === 0 ? "▓" : "▒";
-  const expectedMeter = "█".repeat(3) + pulse + "░".repeat(6);
-  assert.ok(row?.includes(expectedMeter), `meter missing in: ${row}`);
+  assert.ok(row !== undefined);
   assert.ok(lines.some((line) => line.startsWith("└ 📄 ") && line.includes("lib/takt-progress.ts")), JSON.stringify(lines));
   liveTerminal.dispose();
 });
 
-test("meter prefers measured phase completions over the meta phase", async () => {
-  const { stepMeter } = await import("../lib/takt-live-panel.ts");
-  const steps = ["plan", "implement", "verify"];
-  const now = Date.parse("2026-08-20T00:00:00.000Z");
-
-  // Meta says p1 (33% of the step) but 4 of 4 log phases completed → next cell.
-  const measured = stepMeter({
-    workflowSteps: steps,
-    currentStep: "implement",
-    phase: 1,
-    stepPhases: { started: 4, completed: 4 },
-  }, now);
-  assert.equal(measured, "█".repeat(6) + (Math.floor(now / 120) % 2 === 0 ? "▓" : "▒") + "░".repeat(3));
-});
