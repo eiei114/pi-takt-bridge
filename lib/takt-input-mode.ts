@@ -47,7 +47,7 @@ export function describeTaktInputMode(mode: TaktInputMode): string {
     case "pi":
       return "Pi editor focus; TAKT input only via /takt:send or tools";
     case "takt":
-      return "TAKT focus; keys go to the active bridge-owned PTY (Esc returns to pi)";
+      return "TAKT focus; keys go to the active bridge-owned PTY (switch back with /takt:mode or Ctrl+Alt+T)";
     case "pi-auto":
       return "Pi-auto; Pi may send allowed follow-ups to the active bridge-owned PTY";
   }

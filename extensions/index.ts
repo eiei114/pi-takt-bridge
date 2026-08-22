@@ -1811,10 +1811,8 @@ class TaktBridgeRuntime implements TaktProjectStackSource {
   }
 
   private handleTaktFocusInput(data: string): { consume: boolean } {
-    if (matchesKey(data, "escape")) {
-      void this.setInputMode("pi");
-      return { consume: true };
-    }
+    // Esc no longer bails out of takt focus: switching is command/shortcut
+    // territory (/takt:mode or Ctrl+Alt+T), so stray Esc reaches TAKT itself.
 
     const project = this.activeRunningProject();
     if (!project) {

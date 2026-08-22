@@ -103,7 +103,7 @@ After a session is live, dual input modes let you keep talking to TAKT without
 leaving Pi:
 
 - `pi` (default): editor stays on Pi; use `/takt:send` or tools
-- `takt`: keys go to the active bridge-owned PTY; `Esc` returns to `pi`
+- `takt`: keys go to the active bridge-owned PTY; switch back with `/takt:mode` or Ctrl+Alt+T
 - `pi-auto`: entered automatically after a successful `takt_exec_prompt`; Pi can
   inspect with `takt_read_screen` and send follow-ups with `takt_send_input`
   (destructive input still confirms)

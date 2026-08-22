@@ -186,7 +186,7 @@ Cycle with `Ctrl+Alt+T` or `/takt:mode`:
 | Mode | Behavior |
 |---|---|
 | `pi` | Default. Pi keeps editor focus. Use `/takt:send` or `takt_exec_prompt`. |
-| `takt` | Human keys go to the active bridge-owned TAKT PTY. `Esc` returns to `pi`. |
+| `takt` | Human keys go to the active bridge-owned TAKT PTY. Switch back with `/takt:mode` or Ctrl+Alt+T. |
 | `pi-auto` | Pi may call `takt_read_screen` / `takt_send_input` for short follow-ups. |
 
 `takt_exec_prompt` enters `pi-auto` automatically after a successful submit.
